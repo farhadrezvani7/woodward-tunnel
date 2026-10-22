@@ -23,9 +23,17 @@ impl PrivateFile {
         #[cfg(unix)]
         {
             use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(dir)?;
             let path = dir.join(name);
-            let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path)?;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)?;
             f.write_all(bytes)?;
             Ok(Self { path })
         }
@@ -87,7 +95,10 @@ impl Sidecar {
         #[cfg(unix)]
         if let Some(pid) = self.child.id() {
             // SIGTERM via the kill command avoids unsafe libc calls.
-            let _ = std::process::Command::new("kill").arg("-TERM").arg(pid.to_string()).status();
+            let _ = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .status();
         }
         match tokio::time::timeout(grace, self.child.wait()).await {
             Ok(r) => r.map(|_| ()),
@@ -99,7 +110,11 @@ impl Sidecar {
     }
 }
 
-fn pump<R: tokio::io::AsyncRead + Unpin + Send + 'static>(r: R, red: Redactor, tx: mpsc::Sender<String>) {
+fn pump<R: tokio::io::AsyncRead + Unpin + Send + 'static>(
+    r: R,
+    red: Redactor,
+    tx: mpsc::Sender<String>,
+) {
     tokio::spawn(async move {
         let mut lines = BufReader::new(r).lines();
         while let Ok(Some(l)) = lines.next_line().await {

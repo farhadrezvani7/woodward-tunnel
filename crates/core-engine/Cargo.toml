@@ -10,6 +10,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { version = "1", features = ["process", "io-util", "time", "rt", "macros", "net", "sync"] }
 [dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread"] }
 core-import = { path = "../core-import" }
 [lints]
 workspace = true

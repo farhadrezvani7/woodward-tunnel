@@ -15,14 +15,22 @@ pub async fn wait_listening(addr: SocketAddr, limit: Duration) -> io::Result<()>
             return Ok(());
         }
         if Instant::now() >= end {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "engine did not start listening"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "engine did not start listening",
+            ));
         }
         sleep(Duration::from_millis(50)).await;
     }
 }
 
 /// Open a TCP connection to `target` through a SOCKS5 proxy (no auth); returns the stream.
-pub async fn socks5_connect(proxy: SocketAddr, host: &str, port: u16, limit: Duration) -> io::Result<TcpStream> {
+pub async fn socks5_connect(
+    proxy: SocketAddr,
+    host: &str,
+    port: u16,
+    limit: Duration,
+) -> io::Result<TcpStream> {
     timeout(limit, async {
         let mut s = TcpStream::connect(proxy).await?;
         s.write_all(&[5, 1, 0]).await?;
@@ -42,7 +50,10 @@ pub async fn socks5_connect(proxy: SocketAddr, host: &str, port: u16, limit: Dur
         let mut head = [0u8; 4];
         s.read_exact(&mut head).await?;
         if head[1] != 0 {
-            return Err(io::Error::new(io::ErrorKind::ConnectionRefused, format!("socks error {}", head[1])));
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!("socks error {}", head[1]),
+            ));
         }
         let skip = match head[3] {
             1 => 4 + 2,
@@ -64,17 +75,26 @@ pub async fn socks5_connect(proxy: SocketAddr, host: &str, port: u16, limit: Dur
 
 /// Send a tiny HTTP request through the proxy and return the response body start.
 /// Success means data really flowed through the tunnel.
-pub async fn http_get_via_socks(proxy: SocketAddr, host: &str, port: u16, limit: Duration) -> io::Result<String> {
+pub async fn http_get_via_socks(
+    proxy: SocketAddr,
+    host: &str,
+    port: u16,
+    limit: Duration,
+) -> io::Result<String> {
     let mut s = socks5_connect(proxy, host, port, limit).await?;
     let req = format!("GET / HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n");
     s.write_all(req.as_bytes()).await?;
     let mut buf = Vec::new();
-    timeout(limit, s.read_to_end(&mut buf)).await.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "read timed out"))??;
+    timeout(limit, s.read_to_end(&mut buf))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "read timed out"))??;
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// TUN mode probe: a direct TCP connect goes through the system tunnel route.
 pub async fn tcp_reachable(addr: SocketAddr, limit: Duration) -> io::Result<()> {
-    timeout(limit, TcpStream::connect(addr)).await.map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "probe timed out"))??;
+    timeout(limit, TcpStream::connect(addr))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "probe timed out"))??;
     Ok(())
 }
