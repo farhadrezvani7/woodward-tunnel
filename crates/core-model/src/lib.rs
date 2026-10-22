@@ -46,6 +46,46 @@ pub enum Protocol {
 }
 
 impl Protocol {
+    pub const ALL: [Protocol; 13] = [
+        Protocol::WireGuard,
+        Protocol::AmneziaWg,
+        Protocol::Vless,
+        Protocol::Vmess,
+        Protocol::Trojan,
+        Protocol::Shadowsocks,
+        Protocol::Hysteria2,
+        Protocol::OpenVpn,
+        Protocol::Tuic,
+        Protocol::Hysteria1,
+        Protocol::Socks,
+        Protocol::HttpProxy,
+        Protocol::AnyTls,
+    ];
+
+    /// Stable identifier used in storage and APIs. Never change an existing value.
+    pub fn id(self) -> &'static str {
+        match self {
+            Protocol::WireGuard => "wireguard",
+            Protocol::AmneziaWg => "amneziawg",
+            Protocol::Vless => "vless",
+            Protocol::Vmess => "vmess",
+            Protocol::Trojan => "trojan",
+            Protocol::Shadowsocks => "shadowsocks",
+            Protocol::Hysteria2 => "hysteria2",
+            Protocol::OpenVpn => "openvpn",
+            Protocol::Tuic => "tuic",
+            Protocol::Hysteria1 => "hysteria1",
+            Protocol::Socks => "socks",
+            Protocol::HttpProxy => "http",
+            Protocol::AnyTls => "anytls",
+            Protocol::Ssh => "ssh",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Protocol> {
+        Protocol::ALL.iter().copied().chain([Protocol::Ssh]).find(|p| p.id() == id)
+    }
+
     pub fn display_name(self) -> &'static str {
         match self {
             Protocol::WireGuard => "WireGuard",

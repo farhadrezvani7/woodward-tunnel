@@ -12,5 +12,10 @@ url.workspace = true
 percent-encoding.workspace = true
 serde_yaml_ng.workspace = true
 flate2.workspace = true
+image.workspace = true
+rqrr.workspace = true
+
+[dev-dependencies]
+qrcode = { version = "0.14", default-features = false, features = ["image"] }
 [lints]
 workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "core-keyring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+core-store = { path = "../core-store" }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
+[lints]
+workspace = true

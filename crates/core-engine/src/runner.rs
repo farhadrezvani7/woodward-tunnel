@@ -185,7 +185,7 @@ async fn start_singbox(
             .map(|_| ()),
     };
     procs.push(("sing-box", sb));
-    let mut t = Tunnel {
+    let t = Tunnel {
         procs,
         _files: files,
         socks,

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core-model", "crates/core-import", "crates/core-session", "crates/core-log", "crates/core-engine"]
+members = ["crates/core-model", "crates/core-import", "crates/core-session", "crates/core-log", "crates/core-engine", "crates/core-store", "crates/core-keyring", "crates/core-app"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,6 +17,8 @@ url = "2"
 percent-encoding = "2"
 serde_yaml_ng = "0.10"
 flate2 = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rqrr = "0.9"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

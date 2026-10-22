@@ -1,0 +1,28 @@
+[package]
+name = "core-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["http"]
+http = ["dep:ureq"]
+
+[dependencies]
+core-model = { path = "../core-model" }
+core-import = { path = "../core-import" }
+core-store = { path = "../core-store" }
+core-engine = { path = "../core-engine" }
+core-session = { path = "../core-session" }
+core-log = { path = "../core-log" }
+thiserror.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "net"] }
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread"] }
+core-keyring = { path = "../core-keyring" }
+
+[lints]
+workspace = true
