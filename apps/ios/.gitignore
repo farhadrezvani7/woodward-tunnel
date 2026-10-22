@@ -1,0 +1,7 @@
+# Produced by scripts/build-ios.sh and xcodegen
+Generated/
+*.xcodeproj/
+build/
+DerivedData/
+.build/
+*.xcarchive
