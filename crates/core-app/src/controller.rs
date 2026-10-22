@@ -30,6 +30,10 @@ pub struct Status {
     pub connected_since: Option<SystemTime>,
     /// Plain-language text for the user (set on failure).
     pub message: Option<String>,
+    /// English version of `message`.
+    pub message_en: Option<String>,
+    /// Stable failure code (`network`, `server`, `config`, `permission`).
+    pub failure_code: Option<String>,
     pub attempt: u32,
     pub insecure_tls: bool,
 }
@@ -41,6 +45,8 @@ impl Status {
             profile_id: None,
             connected_since: None,
             message: None,
+            message_en: None,
+            failure_code: None,
             attempt: 0,
             insecure_tls: false,
         }
@@ -127,11 +133,14 @@ impl Runner {
             State::Disconnecting => (UiState::Disconnecting, 0),
             State::Failed(_) => (UiState::Failed, 0),
         };
-        let message = match self.session.state() {
-            State::Failed(k) => Some(k.user_message().to_string()),
-            State::Reconnecting { .. } => self.last_failure.map(|k| k.user_message().to_string()),
+        let kind = match self.session.state() {
+            State::Failed(k) => Some(k),
+            State::Reconnecting { .. } => self.last_failure,
             _ => None,
         };
+        let message = kind.map(|k| k.user_message().to_string());
+        let message_en = kind.map(|k| k.user_message_en().to_string());
+        let failure_code = kind.map(|k| k.code().to_string());
         let connected_since = if state == UiState::Connected {
             self.since
         } else {
@@ -142,6 +151,8 @@ impl Runner {
             profile_id: self.profile_id.clone(),
             connected_since,
             message,
+            message_en,
+            failure_code,
             attempt,
             insecure_tls: self.insecure,
         });

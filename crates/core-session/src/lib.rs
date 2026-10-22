@@ -28,6 +28,28 @@ impl FailureKind {
     pub fn retryable(self) -> bool {
         matches!(self, FailureKind::Network | FailureKind::Server)
     }
+    pub fn code(self) -> &'static str {
+        match self {
+            FailureKind::Network => "network",
+            FailureKind::Server => "server",
+            FailureKind::Config => "config",
+            FailureKind::Permission => "permission",
+        }
+    }
+    pub fn user_message_en(self) -> &'static str {
+        match self {
+            FailureKind::Network => {
+                "Your internet connection is down or unstable. Check your network."
+            }
+            FailureKind::Server => {
+                "The server is not responding. Try again or pick another server."
+            }
+            FailureKind::Config => "This config does not work. Ask your provider for a new file.",
+            FailureKind::Permission => {
+                "VPN permission was not granted. Allow it in the system dialog."
+            }
+        }
+    }
     pub fn user_message(self) -> &'static str {
         match self {
             FailureKind::Network => {

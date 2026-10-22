@@ -11,13 +11,16 @@ uniffi::setup_scaffolding!();
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum FfiError {
-    /// `message` is already a plain-language text for the user.
-    #[error("{message}")]
-    Failed { message: String },
+    /// Plain-language text for the user in Persian (`reason`) and English (`reason_en`).
+    #[error("{reason}")]
+    Failed { reason: String, reason_en: String },
 }
 
-fn fail(m: impl Into<String>) -> FfiError {
-    FfiError::Failed { message: m.into() }
+fn fail(fa: impl Into<String>, en: impl Into<String>) -> FfiError {
+    FfiError::Failed {
+        reason: fa.into(),
+        reason_en: en.into(),
+    }
 }
 
 /// Implemented by the platform app; values are opaque strings to store securely.
@@ -69,6 +72,8 @@ pub struct FfiProfile {
 pub struct FfiProblem {
     pub label: String,
     pub message: String,
+    pub message_en: String,
+    pub code: String,
 }
 
 #[derive(uniffi::Record)]
@@ -115,6 +120,8 @@ fn conv_report(r: core_app::ImportReport) -> FfiImportReport {
             .map(|p| FfiProblem {
                 label: p.label,
                 message: p.message,
+                message_en: p.message_en,
+                code: p.code,
             })
             .collect(),
         subscription_urls: r.subscription_urls,
@@ -142,7 +149,12 @@ impl WtApp {
             Arc::new(CallbackStore(secrets)),
             Arc::new(Http),
         )
-        .map_err(|_| fail("ذخیره‌سازی برنامه باز نشد."))?;
+        .map_err(|_| {
+            fail(
+                "ذخیره‌سازی برنامه باز نشد.",
+                "The app storage could not be opened.",
+            )
+        })?;
         Ok(Arc::new(Self { app }))
     }
 
@@ -150,7 +162,7 @@ impl WtApp {
         self.app
             .import_text(&text, &group)
             .map(conv_report)
-            .map_err(|_| fail("ذخیرهٔ کانفیگ ناموفق بود."))
+            .map_err(|_| fail("ذخیرهٔ کانفیگ ناموفق بود.", "Saving the config failed."))
     }
 
     /// File contents or image bytes (QR screenshot).
@@ -158,7 +170,7 @@ impl WtApp {
         self.app
             .import_bytes(&bytes, &group)
             .map(conv_report)
-            .map_err(|_| fail("ذخیرهٔ کانفیگ ناموفق بود."))
+            .map_err(|_| fail("ذخیرهٔ کانفیگ ناموفق بود.", "Saving the config failed."))
     }
 
     /// Only after the user confirmed downloading the subscription.
@@ -171,8 +183,8 @@ impl WtApp {
             .import_subscription(&url, &group)
             .map(conv_report)
             .map_err(|e| match e {
-                core_app::AppError::Fetch(f) => fail(f.user_message()),
-                _ => fail("ذخیرهٔ کانفیگ ناموفق بود."),
+                core_app::AppError::Fetch(f) => fail(f.user_message(), f.user_message_en()),
+                _ => fail("ذخیرهٔ کانفیگ ناموفق بود.", "Saving the config failed."),
             })
     }
 
@@ -180,32 +192,40 @@ impl WtApp {
         self.app
             .list()
             .map(|v| v.into_iter().map(conv).collect())
-            .map_err(|_| fail("خواندن فهرست کانفیگ‌ها ناموفق بود."))
+            .map_err(|_| {
+                fail(
+                    "خواندن فهرست کانفیگ‌ها ناموفق بود.",
+                    "Reading the config list failed.",
+                )
+            })
     }
 
     pub fn rename(&self, id: String, name: String) -> Result<(), FfiError> {
         self.app
             .rename(&id, &name)
-            .map_err(|_| fail("تغییر نام ناموفق بود."))
+            .map_err(|_| fail("تغییر نام ناموفق بود.", "Renaming failed."))
     }
 
     pub fn set_group(&self, id: String, group: String) -> Result<(), FfiError> {
         self.app
             .set_group(&id, &group)
-            .map_err(|_| fail("تغییر دسته ناموفق بود."))
+            .map_err(|_| fail("تغییر دسته ناموفق بود.", "Changing the group failed."))
     }
 
     pub fn delete(&self, id: String) -> Result<(), FfiError> {
-        self.app.delete(&id).map_err(|_| fail("حذف ناموفق بود."))
+        self.app
+            .delete(&id)
+            .map_err(|_| fail("حذف ناموفق بود.", "Deleting failed."))
     }
 
     /// `dns`: resolvers reached through the tunnel. Mobile always uses the system TUN.
     pub fn launch_plan(&self, id: String, dns: Vec<String>) -> Result<FfiLaunchPlan, FfiError> {
-        match self
-            .app
-            .launch_plan(&id, Mode::Tun, dns)
-            .map_err(|_| fail("این کانفیگ آماده اتصال نیست."))?
-        {
+        match self.app.launch_plan(&id, Mode::Tun, dns).map_err(|_| {
+            fail(
+                "این کانفیگ آماده اتصال نیست.",
+                "This config is not ready to connect.",
+            )
+        })? {
             LaunchPlan::SingBox {
                 config_json,
                 insecure_tls,

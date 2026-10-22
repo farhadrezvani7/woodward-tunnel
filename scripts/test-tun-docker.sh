@@ -30,5 +30,5 @@ sleep 3
 docker run --rm --name wt-e2e-client --network $NET --ip 172.31.7.30 --cap-add NET_ADMIN --device /dev/net/tun \
   -v "$SB":/usr/bin/sing-box:ro -v "$EX":/usr/bin/tunnel_e2e:ro $IMG bash -c '
 dnf -y -q install nftables iproute procps-ng >/dev/null 2>&1
-tunnel_e2e "ss://aes-256-gcm:tun-e2e-pw-1234@172.31.7.10:8388#e2e" 172.31.8.20:8080 172.31.7.10
+tunnel_e2e "ss://aes-256-gcm:tun-e2e-pw-1234@wt-e2e-server:8388#e2e" 172.31.8.20:8080 172.31.7.10
 '

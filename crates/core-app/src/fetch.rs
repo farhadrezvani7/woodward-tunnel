@@ -15,6 +15,22 @@ pub enum FetchError {
 }
 
 impl FetchError {
+    pub fn user_message_en(&self) -> String {
+        match self {
+            FetchError::NotHttps => "Only https links can be downloaded.".into(),
+            FetchError::PrivateAddress => {
+                "This address points to a private network and will not be downloaded.".into()
+            }
+            FetchError::Failed(_) => {
+                "Downloading the subscription failed. Check your internet connection and the link."
+                    .into()
+            }
+            FetchError::TooLarge => {
+                "The server response is larger than a normal subscription.".into()
+            }
+        }
+    }
+
     pub fn user_message(&self) -> String {
         match self {
             FetchError::NotHttps => "فقط لینک‌های https قابل دریافت هستند.".into(),

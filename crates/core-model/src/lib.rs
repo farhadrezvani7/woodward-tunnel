@@ -164,6 +164,34 @@ pub enum ConfigIssue {
 }
 
 impl ConfigIssue {
+    /// Stable machine-readable code (never contains user data) for front ends that localize themselves.
+    pub fn code(&self) -> String {
+        match self {
+            ConfigIssue::Empty => "empty".into(),
+            ConfigIssue::TooLarge(_) => "too_large".into(),
+            ConfigIssue::Unrecognized => "unrecognized".into(),
+            ConfigIssue::Unsupported(p) => format!("unsupported:{p}"),
+            ConfigIssue::MissingField { protocol, field } => format!("missing:{protocol}:{field}"),
+            ConfigIssue::InvalidField { protocol, field } => format!("invalid:{protocol}:{field}"),
+        }
+    }
+
+    /// English version of [`ConfigIssue::user_message`].
+    pub fn user_message_en(&self) -> String {
+        match self {
+            ConfigIssue::Empty => "Nothing to add was found. Try the file, QR code or copied text again.".into(),
+            ConfigIssue::TooLarge(_) => "This file is larger than a normal config and was not read, for safety.".into(),
+            ConfigIssue::Unrecognized => "This config was not recognized. Ask your provider to send it as WireGuard, VLESS, VMess, Trojan, Shadowsocks or Hysteria2.".into(),
+            ConfigIssue::Unsupported(p) => format!("{p} is not supported yet."),
+            ConfigIssue::MissingField { protocol, field } => {
+                format!("The {protocol} config was recognized but is missing \"{field}\". Ask your provider to send the complete file again.")
+            }
+            ConfigIssue::InvalidField { protocol, field } => {
+                format!("The {protocol} config was recognized but \"{field}\" is invalid or incomplete. Ask your provider to send the file again.")
+            }
+        }
+    }
+
     /// Message for non-expert users: what happened and what to do next.
     pub fn user_message(&self) -> String {
         match self {

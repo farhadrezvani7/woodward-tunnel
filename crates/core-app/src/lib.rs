@@ -23,8 +23,12 @@ use std::sync::Arc;
 pub struct Problem {
     /// Short, credential-free description of which entry failed.
     pub label: String,
-    /// Plain-language explanation for the user.
+    /// Plain-language explanation for the user (Persian).
     pub message: String,
+    /// Same explanation in English.
+    pub message_en: String,
+    /// Stable code, e.g. `missing:Trojan:port`; contains no user data.
+    pub code: String,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -95,6 +99,8 @@ impl App {
             .map(|i| Problem {
                 label: i.label.clone(),
                 message: i.issue.user_message(),
+                message_en: i.issue.user_message_en(),
+                code: i.issue.code(),
             })
             .collect();
         let report = self.store.add_many(a.profiles, group)?;

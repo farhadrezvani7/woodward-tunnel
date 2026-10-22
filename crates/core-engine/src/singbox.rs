@@ -356,7 +356,15 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
     cfg.insert("inbounds".into(), json!([inbound]));
 
     let dns_server = dns.first().cloned().unwrap_or_else(|| "1.1.1.1".into());
-    cfg.insert("dns".into(), json!({"servers": [{"type": "udp", "tag": "remote", "server": dns_server, "detour": "proxy"}], "final": "remote"}));
+    cfg.insert(
+        "dns".into(),
+        json!({"servers": [
+        // Application lookups go through the tunnel.
+        {"type": "udp", "tag": "remote", "server": dns_server, "detour": "proxy"},
+        // The VPN server's own hostname cannot be resolved through a tunnel that does not exist yet.
+        {"type": "local", "tag": "bootstrap"}
+    ], "final": "remote"}),
+    );
 
     if matches!(p.protocol, Protocol::AmneziaWg) {
         let up = opts
@@ -375,7 +383,7 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
             json!([outbound(p, &mut warnings)?, {"type": "direct", "tag": "direct"}]),
         );
     }
-    let mut route = json!({"final": "proxy", "default_domain_resolver": "remote"});
+    let mut route = json!({"final": "proxy", "default_domain_resolver": "bootstrap"});
     if matches!(mode, Mode::Tun) {
         route["auto_detect_interface"] = json!(true);
         // Send every DNS query the system makes to the engine's resolver, which goes through the tunnel,
