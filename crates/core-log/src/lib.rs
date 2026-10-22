@@ -1,7 +1,7 @@
 //! Log redaction. Two layers: exact known secrets registered from profiles, and pattern
 //! scrubbing (UUIDs, 32-byte base64 keys, `user:pass@` in URLs, PEM blocks) as a safety net
 //! for secrets the process did not know about, e.g. text echoed by an engine.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use core_model::Profile;
 use std::sync::{Arc, RwLock};

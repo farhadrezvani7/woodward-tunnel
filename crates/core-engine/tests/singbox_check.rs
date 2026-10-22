@@ -1,5 +1,5 @@
 //! Every protocol's generated config must pass `sing-box check` (skipped if the binary is absent).
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use core_engine::{singbox, Mode};
 use core_import::detect;

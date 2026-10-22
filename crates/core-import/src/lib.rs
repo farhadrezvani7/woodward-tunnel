@@ -1,6 +1,6 @@
 //! Detect the protocol of pasted/loaded config text and parse it into a validated [`Profile`].
 //! Parsers never execute or follow anything in the input; they only read and validate.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 mod analyze;
 mod formats;

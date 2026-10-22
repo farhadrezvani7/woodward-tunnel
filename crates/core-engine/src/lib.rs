@@ -1,6 +1,6 @@
 //! Engines turn a validated profile into a running tunnel. This crate holds config generation
 //! for each backend, the sidecar process supervisor, and tunnel-verification probes.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod awg;
 pub mod openvpn;

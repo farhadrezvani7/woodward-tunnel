@@ -3,7 +3,7 @@
 //!
 //! `Connected` is reached only on `TunnelVerified` (real evidence, e.g. handshake plus a
 //! probe through the tunnel), never merely because an engine process started.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use std::time::Duration;
 

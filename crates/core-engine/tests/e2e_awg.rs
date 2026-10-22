@@ -1,6 +1,6 @@
 //! AmneziaWG through the real stack: Go test server -> awg-socks helper -> sing-box proxy mode.
 //! Needs the helper binaries; set WT_AWG_SOCKS and WT_AWG_TESTSERVER (built by `scripts/build-engines.sh`).
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use core_engine::runner::{start, Binaries, StartOptions};
 use core_engine::{probe, Mode};

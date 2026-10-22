@@ -1,6 +1,6 @@
 //! Profile storage. Metadata lives in SQLite; secrets (keys, passwords, UUIDs, inline certs)
 //! go to a [`SecretStore`] backed by the OS secure storage and never touch the database.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use core_model::{Profile, Protocol, Secret};
 use rusqlite::{params, Connection, OptionalExtension};

@@ -1,7 +1,7 @@
 //! Leak protection ("kill switch"). Each OS gets a firewall rule set that only lets traffic out
 //! through the tunnel interface, to the VPN server itself, and (optionally) the local network.
 //! The generators are pure text so they can be unit-tested; `apply`/`remove` run the OS tools.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use std::net::IpAddr;
 

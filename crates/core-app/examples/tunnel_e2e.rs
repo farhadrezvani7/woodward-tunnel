@@ -1,7 +1,7 @@
 //! Container test driver: real TUN tunnel, proof that traffic leaves through the VPN server,
 //! kill-switch behaviour when the tunnel dies, and automatic recovery. Linux, needs NET_ADMIN.
 //! usage: tunnel_e2e <share link> <web host:port> <server ip>
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use core_app::{App, Controller, ControllerConfig, HttpFetcher, UiState};
 use core_engine::runner::Binaries;

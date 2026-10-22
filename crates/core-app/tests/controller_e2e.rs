@@ -1,6 +1,6 @@
 //! The whole app stack against real sing-box processes: import a link, connect, verify, survive a
 //! network change, report failures in plain language, and disconnect.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use core_app::{App, Controller, ControllerConfig, HttpFetcher, UiState};
 use core_engine::runner::Binaries;

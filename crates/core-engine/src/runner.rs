@@ -111,12 +111,12 @@ impl Tunnel {
 }
 
 fn spawn(
-    program: &PathBuf,
+    program: &std::path::Path,
     args: Vec<OsString>,
     redactor: &Redactor,
 ) -> Result<Sidecar, StartError> {
     Ok(Sidecar::spawn(SidecarSpec {
-        program: program.clone(),
+        program: program.to_path_buf(),
         args,
         redactor: redactor.clone(),
     })?)

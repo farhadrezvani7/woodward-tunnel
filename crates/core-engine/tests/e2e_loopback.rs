@@ -1,6 +1,6 @@
 //! Real end-to-end check: a client config generated from a share link must carry traffic to a
 //! local sing-box server of the same protocol and back. Skipped when sing-box is absent.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use core_engine::{probe, sidecar::*, singbox, Mode};
 use core_import::detect;

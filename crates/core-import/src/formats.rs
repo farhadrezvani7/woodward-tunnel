@@ -635,14 +635,6 @@ pub fn json_config(v: &Value, out: &mut Analysis) -> Result<(), ConfigIssue> {
             json_config(o, out)?;
         } else if o.get("protocol").is_some() {
             xray_outbound(o, out);
-        } else if o.get("type").is_some()
-            && o.get("server").is_some()
-            && o.get("type")
-                .and_then(Value::as_str)
-                .is_some_and(|t| SB_TYPES.iter().any(|(n, _)| *n == t))
-            && v.is_array()
-        {
-            singbox_outbound(o, out);
         } else if o.get("type").is_some() {
             singbox_outbound(o, out);
         }

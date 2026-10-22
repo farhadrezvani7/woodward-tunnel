@@ -1,6 +1,6 @@
 //! Application facade used by every front end (desktop UI, CLI, mobile bindings):
 //! import configs, manage profiles, and control the connection.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 mod controller;
 mod fetch;
