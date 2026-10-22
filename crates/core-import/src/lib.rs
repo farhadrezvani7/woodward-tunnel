@@ -10,8 +10,8 @@ mod uri;
 mod wireguard;
 
 pub use analyze::{analyze, Analysis, Issue};
-pub use qr::{analyze_bytes, decode_image};
 use core_model::{ConfigIssue, Profile};
+pub use qr::{analyze_bytes, decode_image};
 
 /// Hard cap on input size; real configs are a few KB.
 pub const MAX_INPUT_BYTES: usize = 256 * 1024;

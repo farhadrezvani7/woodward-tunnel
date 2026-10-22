@@ -23,6 +23,8 @@ ureq = { version = "3", optional = true, default-features = false, features = ["
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread"] }
 core-keyring = { path = "../core-keyring" }
+core-policy = { path = "../core-policy" }
+core-store = { path = "../core-store" }
 
 [lints]
 workspace = true

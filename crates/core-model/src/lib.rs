@@ -83,7 +83,11 @@ impl Protocol {
     }
 
     pub fn from_id(id: &str) -> Option<Protocol> {
-        Protocol::ALL.iter().copied().chain([Protocol::Ssh]).find(|p| p.id() == id)
+        Protocol::ALL
+            .iter()
+            .copied()
+            .chain([Protocol::Ssh])
+            .find(|p| p.id() == id)
     }
 
     pub fn display_name(self) -> &'static str {

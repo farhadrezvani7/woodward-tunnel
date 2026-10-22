@@ -6,9 +6,9 @@ mod controller;
 mod fetch;
 
 pub use controller::{Controller, ControllerConfig, Status, UiState};
-pub use fetch::{Fetcher, FetchError};
 #[cfg(feature = "http")]
 pub use fetch::HttpFetcher;
+pub use fetch::{FetchError, Fetcher};
 
 use core_engine::singbox::Options;
 use core_engine::Mode;
@@ -48,7 +48,10 @@ pub enum AppError {
 /// (mobile apps feed `config_json` to the embedded sing-box library).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchPlan {
-    SingBox { config_json: String, insecure_tls: bool },
+    SingBox {
+        config_json: String,
+        insecure_tls: bool,
+    },
     /// Needs the AmneziaWG helper and a SOCKS upstream; handled by the desktop runner.
     AmneziaWg,
     /// Needs the OpenVPN binary; handled by the desktop runner.
@@ -63,10 +66,19 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(data_dir: &Path, secrets: Arc<dyn SecretStore>, fetcher: Arc<dyn Fetcher>) -> Result<Self, AppError> {
+    pub fn new(
+        data_dir: &Path,
+        secrets: Arc<dyn SecretStore>,
+        fetcher: Arc<dyn Fetcher>,
+    ) -> Result<Self, AppError> {
         std::fs::create_dir_all(data_dir).map_err(|e| StoreError::Db(e.to_string()))?;
         let store = Store::open(&data_dir.join("profiles.db"), secrets)?;
-        Ok(Self { store, redactor: Redactor::new(), fetcher, data_dir: data_dir.to_path_buf() })
+        Ok(Self {
+            store,
+            redactor: Redactor::new(),
+            fetcher,
+            data_dir: data_dir.to_path_buf(),
+        })
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -77,9 +89,21 @@ impl App {
     }
 
     fn finish(&self, a: Analysis, group: &str) -> Result<ImportReport, AppError> {
-        let problems = a.issues.iter().map(|i| Problem { label: i.label.clone(), message: i.issue.user_message() }).collect();
+        let problems = a
+            .issues
+            .iter()
+            .map(|i| Problem {
+                label: i.label.clone(),
+                message: i.issue.user_message(),
+            })
+            .collect();
         let report = self.store.add_many(a.profiles, group)?;
-        Ok(ImportReport { added: report.added, duplicates: report.duplicates, problems, subscription_urls: a.subscription_urls })
+        Ok(ImportReport {
+            added: report.added,
+            duplicates: report.duplicates,
+            problems,
+            subscription_urls: a.subscription_urls,
+        })
     }
 
     /// Text from the clipboard, a pasted block, or a decoded camera QR.
@@ -119,12 +143,28 @@ impl App {
         Ok(self.store.delete(id)?)
     }
 
-    pub fn launch_plan(&self, id: &str, mode: Mode, dns: Vec<String>) -> Result<LaunchPlan, AppError> {
+    pub fn launch_plan(
+        &self,
+        id: &str,
+        mode: Mode,
+        dns: Vec<String>,
+    ) -> Result<LaunchPlan, AppError> {
         let p = self.profile(id)?;
         Ok(match p.protocol.engine() {
             EngineKind::SingBox => {
-                let b = core_engine::singbox::build_with(&p, &Options { mode: Some(mode), dns, ..Default::default() }).map_err(|e| StoreError::Db(e.to_string()))?;
-                LaunchPlan::SingBox { config_json: b.config.to_string(), insecure_tls: !b.warnings.is_empty() }
+                let b = core_engine::singbox::build_with(
+                    &p,
+                    &Options {
+                        mode: Some(mode),
+                        dns,
+                        ..Default::default()
+                    },
+                )
+                .map_err(|e| StoreError::Db(e.to_string()))?;
+                LaunchPlan::SingBox {
+                    config_json: b.config.to_string(),
+                    insecure_tls: !b.warnings.is_empty(),
+                }
             }
             EngineKind::AmneziaWg => LaunchPlan::AmneziaWg,
             EngineKind::OpenVpn => LaunchPlan::OpenVpn,
@@ -145,25 +185,41 @@ mod tests {
     }
 
     fn app(body: &str) -> (App, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("wt-app-{}-{}", std::process::id(), body.len()));
+        let dir =
+            std::env::temp_dir().join(format!("wt-app-{}-{}", std::process::id(), body.len()));
         let _ = std::fs::remove_dir_all(&dir);
-        (App::new(&dir, Arc::new(MemorySecretStore::default()), Arc::new(FakeFetcher(body.into()))).unwrap(), dir)
+        (
+            App::new(
+                &dir,
+                Arc::new(MemorySecretStore::default()),
+                Arc::new(FakeFetcher(body.into())),
+            )
+            .unwrap(),
+            dir,
+        )
     }
 
     #[test]
     fn import_manage_and_plan() {
         let (a, dir) = app("trojan://pw1234@sub.example.com:443#S");
-        let r = a.import_text("trojan://pw1234@a.example.com:443#A\nbogus://x\n", "Work").unwrap();
+        let r = a
+            .import_text("trojan://pw1234@a.example.com:443#A\nbogus://x\n", "Work")
+            .unwrap();
         assert_eq!((r.added.len(), r.problems.len()), (1, 1));
         assert!(!r.problems[0].message.is_empty());
         let id = r.added[0].id.clone();
         a.rename(&id, "Berlin").unwrap();
         assert_eq!(a.list().unwrap()[0].name, "Berlin");
-        match a.launch_plan(&id, Mode::Proxy { socks_port: 1080 }, vec![]).unwrap() {
+        match a
+            .launch_plan(&id, Mode::Proxy { socks_port: 1080 }, vec![])
+            .unwrap()
+        {
             LaunchPlan::SingBox { config_json, .. } => assert!(config_json.contains("trojan")),
             other => panic!("{other:?}"),
         }
-        let s = a.import_subscription("https://x.example.com/sub", "Sub").unwrap();
+        let s = a
+            .import_subscription("https://x.example.com/sub", "Sub")
+            .unwrap();
         assert_eq!(s.added.len(), 1);
         a.delete(&id).unwrap();
         assert_eq!(a.list().unwrap().len(), 1);

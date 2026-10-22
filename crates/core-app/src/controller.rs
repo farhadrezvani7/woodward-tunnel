@@ -36,7 +36,14 @@ pub struct Status {
 
 impl Status {
     fn idle() -> Self {
-        Self { state: UiState::Idle, profile_id: None, connected_since: None, message: None, attempt: 0, insecure_tls: false }
+        Self {
+            state: UiState::Idle,
+            profile_id: None,
+            connected_since: None,
+            message: None,
+            attempt: 0,
+            insecure_tls: false,
+        }
     }
 }
 
@@ -125,8 +132,19 @@ impl Runner {
             State::Reconnecting { .. } => self.last_failure.map(|k| k.user_message().to_string()),
             _ => None,
         };
-        let connected_since = if state == UiState::Connected { self.since } else { None };
-        let _ = tx.send(Status { state, profile_id: self.profile_id.clone(), connected_since, message, attempt, insecure_tls: self.insecure });
+        let connected_since = if state == UiState::Connected {
+            self.since
+        } else {
+            None
+        };
+        let _ = tx.send(Status {
+            state,
+            profile_id: self.profile_id.clone(),
+            connected_since,
+            message,
+            attempt,
+            insecure_tls: self.insecure,
+        });
     }
 
     async fn verify(&self) -> bool {
@@ -134,7 +152,14 @@ impl Runner {
         match &self.cfg.mode {
             Mode::Proxy { socks_port } => {
                 let proxy = SocketAddr::from(([127, 0, 0, 1], *socks_port));
-                probe::socks5_connect(proxy, &self.cfg.probe.ip().to_string(), self.cfg.probe.port(), limit).await.is_ok()
+                probe::socks5_connect(
+                    proxy,
+                    &self.cfg.probe.ip().to_string(),
+                    self.cfg.probe.port(),
+                    limit,
+                )
+                .await
+                .is_ok()
             }
             Mode::Tun => probe::tcp_reachable(self.cfg.probe, limit).await.is_ok(),
         }
@@ -149,12 +174,16 @@ impl Runner {
                         self.profile = Some(p);
                         self.queue.push_back(Event::Prepared);
                     }
-                    Err(_) => self.queue.push_back(Event::PrepareFailed(FailureKind::Config)),
+                    Err(_) => self
+                        .queue
+                        .push_back(Event::PrepareFailed(FailureKind::Config)),
                 }
             }
             Action::StartEngine => {
                 let Some(profile) = self.profile.clone() else {
-                    return self.queue.push_back(Event::EngineFailed(FailureKind::Config));
+                    return self
+                        .queue
+                        .push_back(Event::EngineFailed(FailureKind::Config));
                 };
                 let opts = StartOptions {
                     mode: self.cfg.mode.clone(),
@@ -173,7 +202,8 @@ impl Runner {
                             self.queue.push_back(Event::TunnelVerified);
                         } else {
                             self.last_failure = Some(FailureKind::Server);
-                            self.queue.push_back(Event::EngineFailed(FailureKind::Server));
+                            self.queue
+                                .push_back(Event::EngineFailed(FailureKind::Server));
                         }
                     }
                     Err(e) => {
@@ -213,8 +243,25 @@ impl Runner {
     }
 }
 
-async fn run(app: Arc<App>, cfg: ControllerConfig, mut rx: mpsc::UnboundedReceiver<Cmd>, tx: watch::Sender<Status>) {
-    let mut r = Runner { app, cfg, session: Session::default(), profile_id: None, profile: None, tunnel: None, retry: None, since: None, last_failure: None, insecure: false, queue: VecDeque::new() };
+async fn run(
+    app: Arc<App>,
+    cfg: ControllerConfig,
+    mut rx: mpsc::UnboundedReceiver<Cmd>,
+    tx: watch::Sender<Status>,
+) {
+    let mut r = Runner {
+        app,
+        cfg,
+        session: Session::default(),
+        profile_id: None,
+        profile: None,
+        tunnel: None,
+        retry: None,
+        since: None,
+        last_failure: None,
+        insecure: false,
+        queue: VecDeque::new(),
+    };
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     loop {
         let retry = r.retry;

@@ -323,9 +323,16 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
         Mode::Tun => {
             let mut t = json!({
                 "type": "tun", "tag": "tun-in",
+                // Fixed name on Linux so the kill switch can target it; macOS needs utunN, Windows any name.
+                "interface_name": if cfg!(target_os = "linux") { "wt0" } else { "" },
                 "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
                 "auto_route": true, "strict_route": true,
             });
+            if !cfg!(target_os = "linux") {
+                if let Some(o) = t.as_object_mut() {
+                    o.remove("interface_name");
+                }
+            }
             if !opts.bypass.is_empty() {
                 let ex: Vec<String> = opts
                     .bypass
@@ -371,6 +378,9 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
     let mut route = json!({"final": "proxy", "default_domain_resolver": "remote"});
     if matches!(mode, Mode::Tun) {
         route["auto_detect_interface"] = json!(true);
+        // Send every DNS query the system makes to the engine's resolver, which goes through the tunnel,
+        // instead of letting it travel to whatever resolver the network handed out.
+        route["rules"] = json!([{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}]);
     }
     cfg.insert("route".into(), route);
     Ok(Built {

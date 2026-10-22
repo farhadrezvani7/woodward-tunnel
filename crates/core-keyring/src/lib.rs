@@ -9,7 +9,9 @@ pub struct KeyringStore {
 
 impl KeyringStore {
     pub fn new(service: &str) -> Self {
-        Self { service: service.to_string() }
+        Self {
+            service: service.to_string(),
+        }
     }
     fn entry(&self, id: &str) -> Result<keyring::Entry, StoreError> {
         keyring::Entry::new(&self.service, id).map_err(|e| StoreError::Secrets(e.to_string()))
@@ -20,13 +22,19 @@ impl KeyringStore {
         self.put(id, "1")?;
         let ok = self.get(id)?.as_deref() == Some("1");
         self.delete(id)?;
-        if ok { Ok(()) } else { Err(StoreError::Secrets("read-back mismatch".into())) }
+        if ok {
+            Ok(())
+        } else {
+            Err(StoreError::Secrets("read-back mismatch".into()))
+        }
     }
 }
 
 impl SecretStore for KeyringStore {
     fn put(&self, id: &str, value: &str) -> Result<(), StoreError> {
-        self.entry(id)?.set_password(value).map_err(|e| StoreError::Secrets(e.to_string()))
+        self.entry(id)?
+            .set_password(value)
+            .map_err(|e| StoreError::Secrets(e.to_string()))
     }
     fn get(&self, id: &str) -> Result<Option<String>, StoreError> {
         match self.entry(id)?.get_password() {

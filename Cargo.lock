@@ -471,6 +471,7 @@ dependencies = [
  "core-keyring",
  "core-log",
  "core-model",
+ "core-policy",
  "core-session",
  "core-store",
  "serde_json",

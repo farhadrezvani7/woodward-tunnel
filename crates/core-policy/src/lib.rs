@@ -27,15 +27,34 @@ pub enum PolicyError {
 
 impl KillSwitch {
     fn validate(&self) -> Result<(), PolicyError> {
-        let ok = !self.tun_iface.is_empty() && self.tun_iface.len() <= 15 && self.tun_iface.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
-        if ok { Ok(()) } else { Err(PolicyError::BadInterface) }
+        let ok = !self.tun_iface.is_empty()
+            && self.tun_iface.len() <= 15
+            && self
+                .tun_iface
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+        if ok {
+            Ok(())
+        } else {
+            Err(PolicyError::BadInterface)
+        }
     }
 
     /// Linux nftables ruleset in its own table so removal never touches other rules.
     pub fn nftables(&self) -> Result<String, PolicyError> {
         self.validate()?;
-        let v4: Vec<String> = self.server_ips.iter().filter(|i| i.is_ipv4()).map(|i| i.to_string()).collect();
-        let v6: Vec<String> = self.server_ips.iter().filter(|i| i.is_ipv6()).map(|i| i.to_string()).collect();
+        let v4: Vec<String> = self
+            .server_ips
+            .iter()
+            .filter(|i| i.is_ipv4())
+            .map(|i| i.to_string())
+            .collect();
+        let v6: Vec<String> = self
+            .server_ips
+            .iter()
+            .filter(|i| i.is_ipv6())
+            .map(|i| i.to_string())
+            .collect();
         let mut s = String::new();
         s.push_str("table inet wt_killswitch {\n  chain output {\n    type filter hook output priority -100; policy drop;\n");
         s.push_str("    oifname \"lo\" accept\n");
@@ -48,7 +67,9 @@ impl KillSwitch {
             s.push_str(&format!("    ip6 daddr {{ {} }} accept\n", v6.join(", ")));
         }
         // DHCP so the machine keeps its address; nothing else leaves outside the tunnel.
-        s.push_str("    udp sport 68 udp dport 67 accept\n    ip6 daddr ff02::/16 udp dport 546 accept\n");
+        s.push_str(
+            "    udp sport 68 udp dport 67 accept\n    ip6 daddr ff02::/16 udp dport 546 accept\n",
+        );
         if self.allow_lan {
             s.push_str("    ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } accept\n    ip6 daddr { fc00::/7, fe80::/10 } accept\n");
         }
@@ -75,7 +96,9 @@ impl KillSwitch {
     pub fn windows_powershell(&self) -> Result<String, PolicyError> {
         self.validate()?;
         let mut s = String::from("$g='WoodwardTunnel'\n");
-        s.push_str("Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultOutboundAction Block\n");
+        s.push_str(
+            "Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultOutboundAction Block\n",
+        );
         s.push_str(&format!("New-NetFirewallRule -Group $g -DisplayName 'WT allow tunnel' -Direction Outbound -Action Allow -InterfaceAlias '{}'\n", self.tun_iface));
         for ip in &self.server_ips {
             s.push_str(&format!("New-NetFirewallRule -Group $g -DisplayName 'WT allow server' -Direction Outbound -Action Allow -RemoteAddress {ip}\n"));
@@ -100,23 +123,46 @@ mod linux {
     use std::process::{Command, Stdio};
 
     fn run(args: &[&str], stdin: Option<&str>) -> Result<(), PolicyError> {
-        let mut c = Command::new("nft").args(args).stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| PolicyError::Tool(e.to_string()))?;
+        let mut c = Command::new("nft")
+            .args(args)
+            .stdin(if stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| PolicyError::Tool(e.to_string()))?;
         if let (Some(text), Some(mut si)) = (stdin, c.stdin.take()) {
-            si.write_all(text.as_bytes()).map_err(|e| PolicyError::Tool(e.to_string()))?;
+            si.write_all(text.as_bytes())
+                .map_err(|e| PolicyError::Tool(e.to_string()))?;
         }
-        let out = c.wait_with_output().map_err(|e| PolicyError::Tool(e.to_string()))?;
-        if out.status.success() { Ok(()) } else { Err(PolicyError::Tool(String::from_utf8_lossy(&out.stderr).trim().to_string())) }
+        let out = c
+            .wait_with_output()
+            .map_err(|e| PolicyError::Tool(e.to_string()))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(PolicyError::Tool(
+                String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            ))
+        }
     }
 
     impl KillSwitch {
         pub fn apply(&self) -> Result<(), PolicyError> {
             let rules = self.nftables()?;
             // Replace atomically: delete the old table (if any) in the same transaction.
-            let text = format!("table inet wt_killswitch\ndelete table inet wt_killswitch\n{rules}");
+            let text =
+                format!("table inet wt_killswitch\ndelete table inet wt_killswitch\n{rules}");
             run(&["-f", "-"], Some(&text))
         }
         pub fn remove() -> Result<(), PolicyError> {
-            run(&["-f", "-"], Some("table inet wt_killswitch\ndelete table inet wt_killswitch\n"))
+            run(
+                &["-f", "-"],
+                Some("table inet wt_killswitch\ndelete table inet wt_killswitch\n"),
+            )
         }
     }
 }
@@ -126,14 +172,25 @@ mod tests {
     use super::*;
 
     fn ks() -> KillSwitch {
-        KillSwitch { tun_iface: "tun0".into(), server_ips: vec!["203.0.113.9".parse().unwrap(), "2001:db8::9".parse().unwrap()], allow_lan: false }
+        KillSwitch {
+            tun_iface: "tun0".into(),
+            server_ips: vec![
+                "203.0.113.9".parse().unwrap(),
+                "2001:db8::9".parse().unwrap(),
+            ],
+            allow_lan: false,
+        }
     }
 
     #[test]
     fn nft_default_drop_with_only_tunnel_and_server_allowed() {
         let r = ks().nftables().unwrap();
         assert!(r.contains("policy drop"));
-        assert!(r.contains("oifname \"tun0\" accept") && r.contains("203.0.113.9") && r.contains("ip6 daddr { 2001:db8::9 }"));
+        assert!(
+            r.contains("oifname \"tun0\" accept")
+                && r.contains("203.0.113.9")
+                && r.contains("ip6 daddr { 2001:db8::9 }")
+        );
         assert!(!r.contains("192.168.0.0/16"));
     }
 
@@ -148,10 +205,18 @@ mod tests {
 
     #[test]
     fn interface_names_are_validated_against_injection() {
-        for bad in ["", "tun0\"; flush ruleset; \"", "a b", "waytoolonginterfacename"] {
+        for bad in [
+            "",
+            "tun0\"; flush ruleset; \"",
+            "a b",
+            "waytoolonginterfacename",
+        ] {
             let mut k = ks();
             k.tun_iface = bad.into();
-            assert!(k.nftables().is_err() && k.pf().is_err() && k.windows_powershell().is_err(), "{bad}");
+            assert!(
+                k.nftables().is_err() && k.pf().is_err() && k.windows_powershell().is_err(),
+                "{bad}"
+            );
         }
     }
 
