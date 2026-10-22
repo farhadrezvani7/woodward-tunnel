@@ -1,8 +1,12 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+
 jobs:
-  test:
+  rust:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -11,11 +15,36 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engines/awg-socks/go.mod
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Go helper engines
+        shell: bash
+        run: ./scripts/build-engines.sh
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test (end-to-end tests that need sing-box skip themselves when it is absent)
+        shell: bash
+        env:
+          WT_FUZZ_ITERS: "200000"
+        run: |
+          export WT_AWG_SOCKS="$PWD/engines/bin/awg-socks" WT_AWG_TESTSERVER="$PWD/engines/bin/awg-testserver"
+          cargo test --workspace --release
+
+  go-helper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engines/awg-socks/go.mod
+      - run: go vet ./... && go test ./...
+        working-directory: engines/awg-socks
+
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-audit --locked && cargo audit

@@ -159,7 +159,7 @@ pub(crate) fn analyze_inner(text: &str, out: &mut Analysis, depth: u8) {
             break;
         }
         let Some((scheme, _)) = line.split_once("://") else {
-            out.issue(short(line), ConfigIssue::Unrecognized);
+            out.issue(short(line, count), ConfigIssue::Unrecognized);
             continue;
         };
         let scheme = scheme.to_ascii_lowercase();
@@ -169,7 +169,7 @@ pub(crate) fn analyze_inner(text: &str, out: &mut Analysis, depth: u8) {
                 &line
                     .replacen("http", "http-proxy", 1)
                     .replacen("http-proxys", "https-proxy", 1),
-                &short(line),
+                &short(line, count),
                 out,
                 |t| {
                     uri::parse(
@@ -193,13 +193,14 @@ pub(crate) fn analyze_inner(text: &str, out: &mut Analysis, depth: u8) {
             "vless" | "vmess" | "trojan" | "ss" | "hysteria2" | "hy2" | "hysteria" | "tuic"
             | "anytls" | "socks" | "socks5" | "socks5h" | "ssh" | "wireguard" | "wg"
             | "http-proxy" | "https-proxy" => {
-                single(line, &short(line), out, |t| uri::parse(&scheme, t));
+                single(line, &short(line, count), out, |t| uri::parse(&scheme, t));
             }
-            "ssr" => out.issue(short(line), ConfigIssue::Unsupported("ShadowsocksR")),
-            "snell" | "naive+https" | "naive+quic" => {
-                out.issue(short(line), ConfigIssue::Unsupported("this proxy type"))
-            }
-            _ => out.issue(short(line), ConfigIssue::Unrecognized),
+            "ssr" => out.issue(short(line, count), ConfigIssue::Unsupported("ShadowsocksR")),
+            "snell" | "naive+https" | "naive+quic" => out.issue(
+                short(line, count),
+                ConfigIssue::Unsupported("this proxy type"),
+            ),
+            _ => out.issue(short(line, count), ConfigIssue::Unrecognized),
         }
     }
 }
@@ -210,26 +211,40 @@ fn has_userinfo(line: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Short, secret-free label for an issue list: scheme and host only.
-fn short(line: &str) -> String {
-    let scheme = line.split_once("://").map(|(s, _)| s).unwrap_or("link");
-    let host = line
+/// Label for an issue list: scheme and line number only. Host or userinfo are never included,
+/// because a damaged link can put a credential where a host should be.
+fn short(line: &str, n: usize) -> String {
+    const KNOWN: &[&str] = &[
+        "vless",
+        "vmess",
+        "trojan",
+        "ss",
+        "ssr",
+        "hysteria",
+        "hysteria2",
+        "hy2",
+        "tuic",
+        "anytls",
+        "socks",
+        "socks5",
+        "socks5h",
+        "ssh",
+        "wireguard",
+        "wg",
+        "http",
+        "https",
+        "http-proxy",
+        "https-proxy",
+        "vpn",
+        "ssconf",
+    ];
+    // Only well-known scheme names are echoed; anything else may be a damaged credential.
+    let scheme = line
         .split_once("://")
-        .map(|(_, r)| {
-            r.rsplit('@')
-                .next()
-                .unwrap_or(r)
-                .split(['/', '?', '#', ':'])
-                .next()
-                .unwrap_or("")
-        })
-        .unwrap_or("");
-    let host: String = host.chars().take(60).collect();
-    if host.is_empty() || scheme == "vmess" || scheme == "ssr" {
-        scheme.to_string()
-    } else {
-        format!("{scheme}://{host}")
-    }
+        .map(|(s, _)| s.to_ascii_lowercase())
+        .filter(|s| KNOWN.contains(&s.as_str()))
+        .unwrap_or_else(|| "link".to_string());
+    format!("{scheme} #{n}")
 }
 
 #[cfg(test)]
