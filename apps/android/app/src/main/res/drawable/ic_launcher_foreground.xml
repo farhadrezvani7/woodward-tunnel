@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A rounded tunnel arch. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,72 L30,52 A24,24 0 0 1 78,52 L78,72 L68,72 L68,52 A14,14 0 0 0 40,52 L40,72 Z" />
+    <path
+        android:fillColor="#7FD1AE"
+        android:pathData="M48,72 L48,56 A6,6 0 0 1 60,56 L60,72 Z" />
+</vector>

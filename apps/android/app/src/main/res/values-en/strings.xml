@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Woodward Tunnel</string>
+
+    <string name="state_disconnected">Not connected</string>
+    <string name="state_connecting">Connecting…</string>
+    <string name="state_connected">Connected</string>
+    <string name="state_error">Could not connect</string>
+    <string name="hint_connect">Tap to connect</string>
+    <string name="hint_disconnect">Tap to disconnect</string>
+    <string name="hint_connecting">Please wait</string>
+    <string name="action_retry">Try again</string>
+    <string name="cd_connect_button">Connect button</string>
+    <string name="warn_insecure">This configuration does not verify the server certificate and is less secure.</string>
+
+    <string name="profiles_title">My configurations</string>
+    <string name="profiles_empty">You have not added a configuration yet. Start with the Add button.</string>
+    <string name="select_profile_first">Add or select a configuration first.</string>
+    <string name="action_add">Add</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_back">Back</string>
+    <string name="action_more">Options</string>
+
+    <string name="add_title">Add configuration</string>
+    <string name="add_file">From a file</string>
+    <string name="add_qr">Scan QR with camera</string>
+    <string name="add_image">From an image (QR)</string>
+    <string name="add_clipboard">Paste from clipboard</string>
+    <string name="qr_prompt">Place the configuration QR code inside the frame</string>
+    <string name="clipboard_empty">The clipboard is empty.</string>
+
+    <string name="action_rename">Rename</string>
+    <string name="action_group">Group</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_ok">OK</string>
+    <string name="action_save">Save</string>
+    <string name="action_close">Close</string>
+    <string name="label_name">Name</string>
+    <string name="label_group">Group</string>
+    <string name="delete_confirm">Delete \"%1$s\"?</string>
+    <string name="group_none">No group</string>
+
+    <string name="import_added">%1$d configuration(s) added.</string>
+    <string name="import_duplicates">%1$d already existed.</string>
+    <string name="import_nothing">No valid configuration found.</string>
+    <string name="import_problems_title">Import result</string>
+    <string name="import_failed">Could not add.</string>
+    <string name="import_too_large">This file is too large.</string>
+    <string name="import_read_failed">The file could not be read.</string>
+    <string name="external_import_title">Add configuration?</string>
+    <string name="external_import_body">Another app sent you a configuration. Only add it if you trust the sender.</string>
+    <string name="subscription_title">Download configuration list?</string>
+    <string name="subscription_body">The list of configurations will be downloaded from \"%1$s\". Continue?</string>
+    <string name="subscription_download">Download</string>
+
+    <string name="err_unsupported_protocol">This protocol is not supported on this device yet. Please choose another configuration.</string>
+    <string name="err_vpn_permission">VPN permission was not granted. You need to allow it to use the app.</string>
+    <string name="err_engine">Could not connect. Check the configuration and your internet connection, then try again.</string>
+    <string name="err_no_internet">The internet does not work through this connection. The server may be down or its address wrong; try another configuration.</string>
+    <string name="err_core">This configuration cannot be used.</string>
+    <string name="err_storage">The app storage could not be opened. Please reopen the app.</string>
+    <string name="err_revoked">The VPN connection was ended by the system or another app.</string>
+
+    <string name="notif_channel">Connection status</string>
+    <string name="notif_text">Connection is active</string>
+    <string name="notif_connecting">Connecting…</string>
+    <string name="notif_stop">Disconnect</string>
+
+    <string name="settings_title">Advanced settings</string>
+    <string name="settings_warning">This section is for advanced users. You do not need to change anything for normal use.</string>
+    <string name="settings_dns_title">DNS server inside the tunnel</string>
+    <string name="settings_dns_hint">Separate addresses with commas, e.g. 1.1.1.1, 8.8.8.8</string>
+    <string name="settings_dns_invalid">Not a valid DNS address.</string>
+    <string name="settings_subscription_title">Add from a subscription URL</string>
+    <string name="settings_subscription_hint">https subscription URL</string>
+    <string name="settings_subscription_invalid">Only https URLs are accepted.</string>
+    <string name="settings_killswitch_title">Kill switch</string>
+    <string name="settings_killswitch_body">To keep traffic from leaking when the VPN drops, enable \"Always-on VPN\" and \"Block connections without VPN\" for this app in Android\'s VPN settings.</string>
+    <string name="settings_killswitch_open">Open Android VPN settings</string>
+    <string name="settings_killswitch_failed">Could not open VPN settings.</string>
+    <string name="settings_details_title">Technical details of the last error</string>
+    <string name="settings_details_none">No error recorded.</string>
+    <string name="settings_about_title">About</string>
+    <string name="settings_about_body">App version %1$s · engine %2$s</string>
+    <string name="settings_saved">Saved.</string>
+</resources>

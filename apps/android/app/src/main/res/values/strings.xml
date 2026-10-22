@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Persian is the primary language; values-en holds the English translation. -->
+<resources>
+    <string name="app_name">تونل وودوارد</string>
+
+    <string name="state_disconnected">متصل نیستید</string>
+    <string name="state_connecting">در حال اتصال…</string>
+    <string name="state_connected">متصل هستید</string>
+    <string name="state_error">اتصال برقرار نشد</string>
+    <string name="hint_connect">برای اتصال بزنید</string>
+    <string name="hint_disconnect">برای قطع اتصال بزنید</string>
+    <string name="hint_connecting">لطفاً صبر کنید</string>
+    <string name="action_retry">تلاش دوباره</string>
+    <string name="cd_connect_button">دکمهٔ اتصال</string>
+    <string name="warn_insecure">این کانفیگ اعتبار گواهی سرور را بررسی نمی‌کند و امنیت کمتری دارد.</string>
+
+    <string name="profiles_title">کانفیگ‌های من</string>
+    <string name="profiles_empty">هنوز کانفیگی اضافه نکرده‌اید. با دکمهٔ «افزودن» شروع کنید.</string>
+    <string name="select_profile_first">ابتدا یک کانفیگ اضافه یا انتخاب کنید.</string>
+    <string name="action_add">افزودن</string>
+    <string name="action_settings">تنظیمات</string>
+    <string name="action_back">بازگشت</string>
+    <string name="action_more">گزینه‌ها</string>
+
+    <string name="add_title">افزودن کانفیگ</string>
+    <string name="add_file">از فایل</string>
+    <string name="add_qr">اسکن QR با دوربین</string>
+    <string name="add_image">از تصویر (QR)</string>
+    <string name="add_clipboard">چسباندن از کلیپ‌بورد</string>
+    <string name="qr_prompt">کد QR کانفیگ را داخل کادر قرار دهید</string>
+    <string name="clipboard_empty">کلیپ‌بورد خالی است.</string>
+
+    <string name="action_rename">تغییر نام</string>
+    <string name="action_group">دسته‌بندی</string>
+    <string name="action_delete">حذف</string>
+    <string name="action_cancel">انصراف</string>
+    <string name="action_ok">تأیید</string>
+    <string name="action_save">ذخیره</string>
+    <string name="action_close">بستن</string>
+    <string name="label_name">نام</string>
+    <string name="label_group">دسته</string>
+    <string name="delete_confirm">«%1$s» حذف شود؟</string>
+    <string name="group_none">بدون دسته</string>
+
+    <string name="import_added">%1$d کانفیگ اضافه شد.</string>
+    <string name="import_duplicates">%1$d مورد از قبل وجود داشت.</string>
+    <string name="import_nothing">کانفیگ معتبری پیدا نشد.</string>
+    <string name="import_problems_title">نتیجهٔ افزودن</string>
+    <string name="import_failed">افزودن انجام نشد.</string>
+    <string name="import_too_large">این فایل بیش از حد بزرگ است.</string>
+    <string name="import_read_failed">خواندن فایل ممکن نشد.</string>
+    <string name="external_import_title">افزودن کانفیگ؟</string>
+    <string name="external_import_body">برنامهٔ دیگری یک کانفیگ برای شما فرستاده است. فقط اگر از فرستندهٔ آن مطمئن هستید آن را اضافه کنید.</string>
+    <string name="subscription_title">دانلود فهرست کانفیگ‌ها؟</string>
+    <string name="subscription_body">فهرست کانفیگ‌ها از «%1$s» دانلود می‌شود. ادامه می‌دهید؟</string>
+    <string name="subscription_download">دانلود</string>
+
+    <string name="err_unsupported_protocol">این پروتکل هنوز روی این دستگاه پشتیبانی نمی‌شود. لطفاً کانفیگ دیگری انتخاب کنید.</string>
+    <string name="err_vpn_permission">اجازهٔ ساخت اتصال VPN داده نشد. برای استفاده از برنامه باید آن را تأیید کنید.</string>
+    <string name="err_engine">اتصال برقرار نشد. اطلاعات کانفیگ و اینترنت خود را بررسی کنید و دوباره تلاش کنید.</string>
+    <string name="err_no_internet">اینترنت از این مسیر کار نمی‌کند. ممکن است سرور از کار افتاده یا آدرس آن نادرست باشد؛ کانفیگ دیگری را امتحان کنید.</string>
+    <string name="err_core">اطلاعات این کانفیگ قابل استفاده نیست.</string>
+    <string name="err_storage">ذخیره‌سازی برنامه باز نشد. برنامه را دوباره باز کنید.</string>
+    <string name="err_revoked">اتصال VPN توسط سیستم یا برنامهٔ دیگری قطع شد.</string>
+
+    <string name="notif_channel">وضعیت اتصال</string>
+    <string name="notif_text">اتصال فعال است</string>
+    <string name="notif_connecting">در حال برقراری اتصال…</string>
+    <string name="notif_stop">قطع اتصال</string>
+
+    <string name="settings_title">تنظیمات تخصصی</string>
+    <string name="settings_warning">این بخش برای کاربران حرفه‌ای است. برای استفادهٔ عادی نیازی به تغییر آن نیست.</string>
+    <string name="settings_dns_title">سرور DNS داخل تونل</string>
+    <string name="settings_dns_hint">آدرس‌ها را با ویرگول جدا کنید، مثلاً 1.1.1.1, 8.8.8.8</string>
+    <string name="settings_dns_invalid">آدرس DNS معتبر نیست.</string>
+    <string name="settings_subscription_title">افزودن از آدرس اشتراک</string>
+    <string name="settings_subscription_hint">آدرس https اشتراک</string>
+    <string name="settings_subscription_invalid">فقط آدرس https پذیرفته می‌شود.</string>
+    <string name="settings_killswitch_title">قطع‌کنندهٔ اضطراری (Kill switch)</string>
+    <string name="settings_killswitch_body">برای اینکه با قطع شدن VPN، اینترنت ناامن شما به‌طور ناخواسته باز نشود، در تنظیمات اندروید گزینه‌های «VPN همیشه روشن» و «مسدود کردن اتصال‌های بدون VPN» را برای این برنامه فعال کنید.</string>
+    <string name="settings_killswitch_open">باز کردن تنظیمات VPN اندروید</string>
+    <string name="settings_killswitch_failed">تنظیمات VPN باز نشد.</string>
+    <string name="settings_details_title">جزئیات فنی آخرین خطا</string>
+    <string name="settings_details_none">خطایی ثبت نشده است.</string>
+    <string name="settings_about_title">دربارهٔ برنامه</string>
+    <string name="settings_about_body">نسخهٔ برنامه %1$s · موتور %2$s</string>
+    <string name="settings_saved">ذخیره شد.</string>
+</resources>
