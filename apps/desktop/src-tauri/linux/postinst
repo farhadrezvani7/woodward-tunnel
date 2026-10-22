@@ -1,0 +1,10 @@
+#!/bin/sh
+# Give the bundled tunnel engine the capabilities it needs to create a TUN device without root.
+# Note: anyone who can run this engine with a config of their choice gets those capabilities.
+set -e
+ENGINE=/usr/bin/wt-sing-box
+if [ -x "$ENGINE" ] && command -v setcap >/dev/null 2>&1; then
+    setcap cap_net_admin,cap_net_bind_service,cap_net_raw+ep "$ENGINE" || \
+        echo "woodward-tunnel: could not set capabilities; the app will ask for permission on first connect" >&2
+fi
+exit 0

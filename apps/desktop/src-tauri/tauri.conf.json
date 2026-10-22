@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Woodward Tunnel",
+  "version": "0.1.0",
+  "identifier": "app.woodward.tunnel",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Woodward Tunnel",
+        "width": 440,
+        "height": 760,
+        "minWidth": 360,
+        "minHeight": 560,
+        "resizable": true,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "freezePrototype": true,
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "nsis", "msi", "dmg", "app"],
+    "category": "Utility",
+    "shortDescription": "Simple multi-protocol VPN client",
+    "longDescription": "Woodward Tunnel imports VPN configurations (files, links, QR images, subscriptions) and connects with one button.",
+    "copyright": "Apache-2.0",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/wt-sing-box", "binaries/wt-awg-socks"],
+    "resources": {
+      "resources/macos-elevate-singbox.sh": "macos-elevate-singbox.sh"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libcap2-bin", "policykit-1 | polkitd", "libwebkit2gtk-4.1-0", "libayatana-appindicator3-1"],
+        "postInstallScript": "linux/postinst",
+        "preRemoveScript": "linux/prerm"
+      }
+    },
+    "windows": {
+      "nsis": { "installMode": "perMachine" }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": null
+    }
+  }
+}

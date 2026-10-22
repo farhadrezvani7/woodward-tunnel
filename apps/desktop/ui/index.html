@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Woodward Tunnel</title>
+  <link rel="stylesheet" href="app.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#connect-btn" data-i18n="skip">رفتن به دکمهٔ اتصال</a>
+  <header class="top">
+    <h1 class="brand" data-i18n="appName">ووردوارد تانل</h1>
+    <div class="top-actions">
+      <button type="button" id="lang-btn" class="chip" aria-label="Language / زبان">English</button>
+      <button type="button" id="adv-btn" class="chip" data-i18n="advanced">تنظیمات تخصصی</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="state-title">
+      <button type="button" id="connect-btn" class="power" data-state="idle" aria-describedby="state-title">
+        <span class="power-icon" id="power-icon" aria-hidden="true"></span>
+        <span class="power-label" id="power-label">اتصال</span>
+      </button>
+      <p id="state-title" class="state-title" role="status" aria-live="polite">قطع است</p>
+      <p id="timer" class="timer" hidden><bdi dir="ltr" id="timer-text">00:00:00</bdi></p>
+      <p id="state-detail" class="state-detail" aria-live="polite"></p>
+      <p id="insecure" class="note warn" hidden></p>
+    </section>
+
+    <section class="profiles" aria-labelledby="profiles-h">
+      <div class="profiles-head">
+        <h2 id="profiles-h" data-i18n="profiles">سرورها</h2>
+        <div class="add-actions">
+          <button type="button" id="add-file" class="btn" data-i18n="addFile">افزودن از فایل یا QR</button>
+          <button type="button" id="add-paste" class="btn" data-i18n="addPaste">چسباندن</button>
+        </div>
+      </div>
+      <p id="empty" class="empty" hidden></p>
+      <ul id="list" class="list"></ul>
+      <p class="hint" data-i18n="dropHint">می‌توانید فایل کانفیگ یا تصویر QR را اینجا رها کنید.</p>
+    </section>
+  </main>
+
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <div id="drop" class="drop" hidden aria-hidden="true"><p data-i18n="dropNow">برای افزودن، فایل را رها کنید</p></div>
+
+  <!-- paste fallback -->
+  <dialog id="dlg-paste" aria-labelledby="paste-h">
+    <form method="dialog" class="dlg">
+      <h2 id="paste-h" data-i18n="pasteTitle">چسباندن کانفیگ یا لینک</h2>
+      <p class="muted" data-i18n="pasteHelp">متن را اینجا بچسبانید (Ctrl+V).</p>
+      <textarea id="paste-text" rows="6" spellcheck="false" autocomplete="off" dir="ltr"></textarea>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" id="paste-ok" data-i18n="add">افزودن</button>
+        <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- subscription confirmation -->
+  <dialog id="dlg-sub" aria-labelledby="sub-h">
+    <form method="dialog" class="dlg">
+      <h2 id="sub-h" data-i18n="subTitle">دریافت از لینک اشتراک؟</h2>
+      <p id="sub-text" class="muted"></p>
+      <p class="url" dir="ltr" id="sub-url"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" id="sub-ok" data-i18n="subYes">بله، دریافت کن</button>
+        <button type="button" class="btn" data-close data-i18n="subNo">نه</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- edit profile -->
+  <dialog id="dlg-edit" aria-labelledby="edit-h">
+    <form method="dialog" class="dlg">
+      <h2 id="edit-h" data-i18n="editTitle">ویرایش سرور</h2>
+      <label for="edit-name" data-i18n="name">نام</label>
+      <input id="edit-name" type="text" maxlength="80" autocomplete="off">
+      <label for="edit-group" data-i18n="group">گروه (اختیاری)</label>
+      <input id="edit-group" type="text" maxlength="60" autocomplete="off">
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" id="edit-ok" data-i18n="save">ذخیره</button>
+        <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
+        <button type="button" class="btn danger" id="edit-del" data-i18n="delete">حذف</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- delete confirmation -->
+  <dialog id="dlg-del" aria-labelledby="del-h">
+    <form method="dialog" class="dlg">
+      <h2 id="del-h" data-i18n="delTitle">این سرور حذف شود؟</h2>
+      <p id="del-text" class="muted"></p>
+      <div class="dlg-actions">
+        <button type="button" class="btn danger" id="del-ok" data-i18n="delete">حذف</button>
+        <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- permission -->
+  <dialog id="dlg-priv" aria-labelledby="priv-h">
+    <form method="dialog" class="dlg">
+      <h2 id="priv-h" data-i18n="privTitle">اجازهٔ مدیر سیستم لازم است</h2>
+      <p class="muted" data-i18n="privText">برای ساخت VPN روی کل سیستم، یک بار باید رمز سیستم را وارد کنید. سیستم‌عامل خودش این پنجره را نشان می‌دهد.</p>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" id="priv-ok" data-i18n="privYes">ادامه</button>
+        <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- advanced -->
+  <dialog id="dlg-adv" aria-labelledby="adv-h">
+    <form method="dialog" class="dlg wide">
+      <h2 id="adv-h" data-i18n="advanced">تنظیمات تخصصی</h2>
+      <p class="muted" data-i18n="advHelp">این بخش فقط برای کاربران حرفه‌ای است. تنظیمات پیش‌فرض برای بیشتر افراد مناسب است.</p>
+
+      <fieldset>
+        <legend data-i18n="modeLegend">نوع اتصال</legend>
+        <label class="radio"><input type="radio" name="mode" value="tun"> <span data-i18n="modeTun">کل سیستم (توصیه می‌شود)</span></label>
+        <label class="radio"><input type="radio" name="mode" value="proxy"> <span data-i18n="modeProxy">فقط پروکسی محلی (بدون نیاز به دسترسی مدیر)</span></label>
+      </fieldset>
+
+      <label for="adv-port" data-i18n="port">درگاه SOCKS محلی</label>
+      <input id="adv-port" type="number" min="1024" max="65535" dir="ltr" inputmode="numeric">
+
+      <label for="adv-dns" data-i18n="dns">سرورهای DNS (با ویرگول جدا کنید)</label>
+      <input id="adv-dns" type="text" dir="ltr" placeholder="1.1.1.1, 8.8.8.8" autocomplete="off">
+
+      <label class="check"><input type="checkbox" id="adv-details"> <span data-i18n="showDetails">نمایش نشانی سرورها در فهرست</span></label>
+
+      <h3 data-i18n="systemInfo">اطلاعات سیستم</h3>
+      <dl id="adv-info" class="info" dir="ltr"></dl>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" id="adv-save" data-i18n="save">ذخیره</button>
+        <button type="button" class="btn" data-close data-i18n="close">بستن</button>
+        <button type="button" class="btn" id="adv-grant" data-i18n="fixPerm" hidden>تنظیم دسترسی</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal permissions: the UI may call the app's own commands and receive events. No shell, no filesystem, no clipboard plugin.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

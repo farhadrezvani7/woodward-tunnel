@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+[ -x /usr/bin/wt-sing-box ] && command -v setcap >/dev/null 2>&1 && setcap -r /usr/bin/wt-sing-box 2>/dev/null || true
+exit 0
