@@ -10,7 +10,7 @@ fn s(p: &Profile, k: &str) -> Option<String> {
 }
 
 /// `endpoint_ip`: the peer's address already resolved by the caller (outside the tunnel).
-pub fn helper_config(p: &Profile, endpoint_ip: IpAddr) -> Result<Value, EngineError> {
+pub fn helper_config(p: &Profile, endpoint_ip: IpAddr, listen: &str) -> Result<Value, EngineError> {
     let list = |v: String| {
         v.split(',')
             .map(|x| x.trim().to_string())
@@ -45,7 +45,7 @@ pub fn helper_config(p: &Profile, endpoint_ip: IpAddr) -> Result<Value, EngineEr
         "mtu": s(p, "mtu").and_then(|m| m.parse::<u32>().ok()).unwrap_or(1280),
         "peer": peer,
         "awg": Value::Object(awg),
-        "listen": "127.0.0.1:0",
+        "listen": listen,
     }))
 }
 
@@ -59,7 +59,7 @@ mod tests {
         let k = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         let conf = format!("[Interface]\nPrivateKey = {k}\nAddress = 10.8.1.2/32\nDNS = 1.1.1.1, 8.8.8.8\nJc = 5\nS1 = 20\nH4 = 99\n[Peer]\nPublicKey = {k}\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0\n");
         let p = detect(&conf).unwrap();
-        let v = helper_config(&p, "203.0.113.9".parse().unwrap()).unwrap();
+        let v = helper_config(&p, "203.0.113.9".parse().unwrap(), "127.0.0.1:0").unwrap();
         assert_eq!(v["peer"]["endpoint"], "203.0.113.9:51820");
         assert_eq!(v["awg"]["jc"], "5");
         assert_eq!(v["awg"]["h4"], "99");

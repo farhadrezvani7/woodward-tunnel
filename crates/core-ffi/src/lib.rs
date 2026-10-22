@@ -91,8 +91,15 @@ pub enum FfiLaunchPlan {
         config_json: String,
         insecure_tls: bool,
     },
-    /// Needs the AmneziaWG helper (not available on this build).
-    AmneziaWg,
+    /// Run the AmneziaWG helper with `helper_json` (listens on 127.0.0.1:`socks_port`), then sing-box
+    /// with `singbox_config_json`. `endpoint_ip` is the already-resolved peer and is excluded from the
+    /// tunnel routes in the sing-box config.
+    AmneziaWg {
+        helper_json: String,
+        singbox_config_json: String,
+        socks_port: u16,
+        endpoint_ip: String,
+    },
     /// Needs the OpenVPN engine (not available on this build).
     OpenVpn,
 }
@@ -233,7 +240,17 @@ impl WtApp {
                 config_json,
                 insecure_tls,
             }),
-            LaunchPlan::AmneziaWg => Ok(FfiLaunchPlan::AmneziaWg),
+            LaunchPlan::AmneziaWg {
+                helper_json,
+                singbox_config_json,
+                socks_port,
+                endpoint_ip,
+            } => Ok(FfiLaunchPlan::AmneziaWg {
+                helper_json,
+                singbox_config_json,
+                socks_port,
+                endpoint_ip,
+            }),
             LaunchPlan::OpenVpn => Ok(FfiLaunchPlan::OpenVpn),
         }
     }

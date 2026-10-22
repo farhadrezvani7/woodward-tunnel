@@ -56,8 +56,16 @@ pub enum LaunchPlan {
         config_json: String,
         insecure_tls: bool,
     },
-    /// Needs the AmneziaWG helper and a SOCKS upstream; handled by the desktop runner.
-    AmneziaWg,
+    /// Run the AmneziaWG helper with `helper_json` (it listens on 127.0.0.1:`socks_port`), then run
+    /// sing-box with `singbox_config_json`, which tunnels into that SOCKS port. `endpoint_ip` is the
+    /// peer address already resolved outside the tunnel; the config already excludes it from the
+    /// TUN routes so the helper's own packets do not loop back into the tunnel.
+    AmneziaWg {
+        helper_json: String,
+        singbox_config_json: String,
+        socks_port: u16,
+        endpoint_ip: String,
+    },
     /// Needs the OpenVPN binary; handled by the desktop runner.
     OpenVpn,
 }
@@ -172,7 +180,35 @@ impl App {
                     insecure_tls: !b.warnings.is_empty(),
                 }
             }
-            EngineKind::AmneziaWg => LaunchPlan::AmneziaWg,
+            EngineKind::AmneziaWg => {
+                let ip = std::net::ToSocketAddrs::to_socket_addrs(&(p.host.as_str(), p.port))
+                    .ok()
+                    .and_then(|mut a| a.next())
+                    .map(|a| a.ip())
+                    .ok_or_else(|| StoreError::Db("cannot resolve the server address".into()))?;
+                let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+                    .and_then(|l| l.local_addr())
+                    .map(|a| a.port())
+                    .map_err(|e| StoreError::Db(e.to_string()))?;
+                let helper = core_engine::awg::helper_config(&p, ip, &format!("127.0.0.1:{port}"))
+                    .map_err(|e| StoreError::Db(e.to_string()))?;
+                let sb = core_engine::singbox::build_with(
+                    &p,
+                    &Options {
+                        mode: Some(mode),
+                        dns,
+                        upstream_socks: Some(std::net::SocketAddr::from(([127, 0, 0, 1], port))),
+                        bypass: vec![ip],
+                    },
+                )
+                .map_err(|e| StoreError::Db(e.to_string()))?;
+                LaunchPlan::AmneziaWg {
+                    helper_json: helper.to_string(),
+                    singbox_config_json: sb.config.to_string(),
+                    socks_port: port,
+                    endpoint_ip: ip.to_string(),
+                }
+            }
             EngineKind::OpenVpn => LaunchPlan::OpenVpn,
         })
     }
@@ -223,6 +259,29 @@ mod tests {
             LaunchPlan::SingBox { config_json, .. } => assert!(config_json.contains("trojan")),
             other => panic!("{other:?}"),
         }
+        let k = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        let awg = format!("[Interface]\nPrivateKey = {k}\nAddress = 10.0.0.2/32\nJc = 5\n[Peer]\nPublicKey = {k}\nEndpoint = 203.0.113.9:51820\nAllowedIPs = 0.0.0.0/0\n");
+        let awg_id = a.import_text(&awg, "").unwrap().added[0].id.clone();
+        match a.launch_plan(&awg_id, Mode::Tun, vec![]).unwrap() {
+            LaunchPlan::AmneziaWg {
+                helper_json,
+                singbox_config_json,
+                socks_port,
+                endpoint_ip,
+            } => {
+                assert_eq!(endpoint_ip, "203.0.113.9");
+                assert!(
+                    helper_json.contains(&format!("127.0.0.1:{socks_port}"))
+                        && helper_json.contains("\"jc\":\"5\"")
+                );
+                assert!(
+                    singbox_config_json.contains("203.0.113.9/32")
+                        && singbox_config_json.contains(&socks_port.to_string())
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        a.delete(&awg_id).unwrap();
         let s = a
             .import_subscription("https://x.example.com/sub", "Sub")
             .unwrap();

@@ -211,7 +211,7 @@ async fn start_awg(profile: &Profile, o: &StartOptions) -> Result<Tunnel, StartE
     .await
     .map_err(|_| StartError::Resolve)?
     .ok_or(StartError::Resolve)?;
-    let cfg = awg::helper_config(profile, ip)?;
+    let cfg = awg::helper_config(profile, ip, "127.0.0.1:0")?;
     let file = PrivateFile::write(&o.work_dir, "awg.json", cfg.to_string().as_bytes())?;
     let mut helper = spawn(&o.bins.awg_socks, vec![file.path().into()], &o.redactor)?;
     let line = match wait_line(&mut helper, "LISTEN ", o.ready_timeout).await {
