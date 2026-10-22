@@ -37,6 +37,12 @@ pub enum Protocol {
     Shadowsocks,
     Hysteria2,
     OpenVpn,
+    Tuic,
+    Hysteria1,
+    Socks,
+    HttpProxy,
+    AnyTls,
+    Ssh,
 }
 
 impl Protocol {
@@ -50,6 +56,30 @@ impl Protocol {
             Protocol::Shadowsocks => "Shadowsocks",
             Protocol::Hysteria2 => "Hysteria2",
             Protocol::OpenVpn => "OpenVPN",
+            Protocol::Tuic => "TUIC",
+            Protocol::Hysteria1 => "Hysteria",
+            Protocol::Socks => "SOCKS5",
+            Protocol::HttpProxy => "HTTP Proxy",
+            Protocol::AnyTls => "AnyTLS",
+            Protocol::Ssh => "SSH",
+        }
+    }
+}
+
+/// Which backend runs a protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineKind {
+    SingBox,
+    OpenVpn,
+    AmneziaWg,
+}
+
+impl Protocol {
+    pub fn engine(self) -> EngineKind {
+        match self {
+            Protocol::OpenVpn => EngineKind::OpenVpn,
+            Protocol::AmneziaWg => EngineKind::AmneziaWg,
+            _ => EngineKind::SingBox,
         }
     }
 }

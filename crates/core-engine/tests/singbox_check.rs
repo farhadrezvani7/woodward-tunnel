@@ -16,6 +16,12 @@ fn links() -> Vec<String> {
         "trojan://pw1234@example.com:443?sni=example.com#t".into(),
         "hysteria2://auth@example.com:8443?sni=example.com&obfs=salamander&obfs-password=xx1234#h".into(),
         "ss://aes-256-gcm:pw1234@example.com:8388#s".into(),
+        format!("tuic://{UUID}:pw1234@example.com:443?congestion_control=bbr&udp_relay_mode=native&sni=example.com#tu"),
+        "hysteria://example.com:443?auth=secret1&peer=example.com&upmbps=50&downmbps=100#h1".into(),
+        "anytls://pw1234@example.com:443?sni=example.com#at".into(),
+        "socks5://u:p@example.com:1080#so".into(),
+        "http-proxy://u:p@example.com:8080#ht".into(),
+        "ssh://root:pw@example.com:22#ssh".into(),
         format!("[Interface]\nPrivateKey = {K}\nAddress = 10.0.0.2/32\nMTU = 1380\n[Peer]\nPublicKey = {K}\nPresharedKey = {K}\nEndpoint = example.com:51820\nAllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = 25\n"),
     ]
 }
@@ -48,6 +54,45 @@ fn all_generated_configs_pass_sing_box_check() {
                 "{:?} {:?}: {}",
                 profile.protocol,
                 mode,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn imported_json_and_clash_configs_pass_sing_box_check() {
+    if Command::new("sing-box").arg("version").output().is_err() {
+        return;
+    }
+    let sb = format!(
+        r#"{{"outbounds":[{{"type":"vless","tag":"a","server":"h.example.com","server_port":443,"uuid":"{UUID}","tls":{{"enabled":true,"server_name":"h.example.com"}}}},{{"type":"hysteria2","tag":"b","server":"h.example.com","server_port":443,"password":"pw1234","tls":{{"enabled":true,"server_name":"h.example.com"}}}}]}}"#
+    );
+    let xr = format!(
+        r#"{{"outbounds":[{{"protocol":"vmess","settings":{{"vnext":[{{"address":"v.example.com","port":443,"users":[{{"id":"{UUID}","security":"auto"}}]}}]}},"streamSettings":{{"network":"ws","security":"tls","wsSettings":{{"path":"/p"}}}}}}]}}"#
+    );
+    let cl = format!("proxies:\n  - {{name: a, type: tuic, server: t.example.com, port: 443, uuid: {UUID}, password: pw1234, sni: t.example.com}}\n  - {{name: w, type: wireguard, server: w.example.com, port: 51820, ip: 10.0.0.2, private-key: {K}, public-key: {K}}}\n");
+    let dir = std::env::temp_dir().join(format!("wt-check2-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut n = 0;
+    for src in [sb, xr, cl] {
+        let a = core_import::analyze(&src);
+        assert!(!a.profiles.is_empty(), "{:?}", a.issues);
+        for p in &a.profiles {
+            let built = singbox::build(p, &Mode::Proxy { socks_port: 10808 }, &[]).unwrap();
+            let path = dir.join(format!("i{n}.json"));
+            n += 1;
+            std::fs::write(&path, serde_json::to_vec(&built.config).unwrap()).unwrap();
+            let out = Command::new("sing-box")
+                .args(["check", "-c"])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{:?}: {}",
+                p.protocol,
                 String::from_utf8_lossy(&out.stderr)
             );
         }

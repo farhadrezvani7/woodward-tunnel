@@ -21,6 +21,18 @@ const SS_METHODS: &[&str] = &[
 ];
 /// Query keys copied into `settings`. Anything else is ignored rather than passed to an engine.
 const KEEP: &[&str] = &[
+    "congestion_control",
+    "udp_relay_mode",
+    "up",
+    "down",
+    "upmbps",
+    "downmbps",
+    "peer",
+    "reserved",
+    "address",
+    "mtu",
+    "publickey",
+    "keepalive",
     "type",
     "security",
     "sni",
@@ -48,6 +60,13 @@ pub fn parse(scheme: &str, text: &str) -> Result<Profile, ConfigIssue> {
         "trojan" => generic(text, Protocol::Trojan, "Trojan", false),
         "hysteria2" | "hy2" => generic(text, Protocol::Hysteria2, "Hysteria2", false),
         "vmess" => vmess(text),
+        "tuic" => tuic(text),
+        "hysteria" => hysteria1(text),
+        "anytls" => generic(text, Protocol::AnyTls, "AnyTLS", false),
+        "socks" | "socks5" | "socks5h" => socks(text),
+        "http-proxy" | "https-proxy" => http_proxy(text),
+        "ssh" => ssh(text),
+        "wireguard" | "wg" => wireguard_uri(text),
         "ss" => shadowsocks(text),
         _ => Err(ConfigIssue::Unrecognized),
     }
@@ -337,6 +356,256 @@ fn shadowsocks(text: &str) -> Result<Profile, ConfigIssue> {
     })
 }
 
+fn userinfo_pair(url: &Url) -> (String, Option<String>) {
+    let u = percent_decode_str(url.username())
+        .decode_utf8_lossy()
+        .into_owned();
+    let pw = url
+        .password()
+        .map(|p| percent_decode_str(p).decode_utf8_lossy().into_owned());
+    (u, pw)
+}
+
+fn tuic(text: &str) -> Result<Profile, ConfigIssue> {
+    const P: &str = "TUIC";
+    let url = Url::parse(text).map_err(|_| ConfigIssue::InvalidField {
+        protocol: P,
+        field: "link",
+    })?;
+    let (uuid, pw) = userinfo_pair(&url);
+    if !is_uuid(&uuid) {
+        return Err(ConfigIssue::InvalidField {
+            protocol: P,
+            field: "UUID",
+        });
+    }
+    let pw = pw
+        .filter(|p| !p.is_empty())
+        .ok_or(ConfigIssue::MissingField {
+            protocol: P,
+            field: "password",
+        })?;
+    let host = host_of(&url, P)?;
+    let port = port_of(&url, P)?;
+    let mut secrets = BTreeMap::new();
+    secrets.insert("uuid".into(), Secret::new(uuid));
+    secrets.insert("password".into(), Secret::new(pw));
+    let name = clean_name(url.fragment().unwrap_or(""), &host);
+    Ok(Profile {
+        name,
+        protocol: Protocol::Tuic,
+        host,
+        port,
+        settings: keep_params(&url),
+        secrets,
+    })
+}
+
+/// Hysteria v1: `hysteria://host:port?auth=...&peer=sni&insecure=1&upmbps=..&downmbps=..`
+fn hysteria1(text: &str) -> Result<Profile, ConfigIssue> {
+    const P: &str = "Hysteria";
+    let url = Url::parse(text).map_err(|_| ConfigIssue::InvalidField {
+        protocol: P,
+        field: "link",
+    })?;
+    let host = host_of(&url, P)?;
+    let port = port_of(&url, P)?;
+    let auth = url
+        .query_pairs()
+        .find(|(k, _)| k == "auth")
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_default();
+    let mut settings = keep_params(&url);
+    if let Some(peer) = settings.remove("peer") {
+        settings.entry("sni".into()).or_insert(peer);
+    }
+    let mut secrets = BTreeMap::new();
+    if !auth.is_empty() {
+        secrets.insert("password".into(), Secret::new(auth));
+    }
+    let name = clean_name(url.fragment().unwrap_or(""), &host);
+    Ok(Profile {
+        name,
+        protocol: Protocol::Hysteria1,
+        host,
+        port,
+        settings,
+        secrets,
+    })
+}
+
+/// `socks5://user:pass@host:port` or v2rayN style `socks://base64(user:pass)@host:port`.
+fn socks(text: &str) -> Result<Profile, ConfigIssue> {
+    const P: &str = "SOCKS5";
+    let url = Url::parse(text).map_err(|_| ConfigIssue::InvalidField {
+        protocol: P,
+        field: "link",
+    })?;
+    let host = host_of(&url, P)?;
+    let port = port_of(&url, P)?;
+    let (mut user, mut pw) = userinfo_pair(&url);
+    if pw.is_none() && !user.is_empty() {
+        if let Some(d) = b64_any(&user).and_then(|b| String::from_utf8(b).ok()) {
+            if let Some((u, p)) = d.split_once(':') {
+                user = u.to_string();
+                pw = Some(p.to_string());
+            }
+        }
+    }
+    let mut settings = BTreeMap::new();
+    let mut secrets = BTreeMap::new();
+    if !user.is_empty() {
+        settings.insert("username".into(), user);
+        secrets.insert("password".into(), Secret::new(pw.unwrap_or_default()));
+    }
+    Ok(Profile {
+        name: clean_name(url.fragment().unwrap_or(""), &host),
+        protocol: Protocol::Socks,
+        host,
+        port,
+        settings,
+        secrets,
+    })
+}
+
+fn http_proxy(text: &str) -> Result<Profile, ConfigIssue> {
+    const P: &str = "HTTP Proxy";
+    let tls = text.starts_with("https-proxy");
+    let fixed =
+        text.replacen("https-proxy://", "https://", 1)
+            .replacen("http-proxy://", "http://", 1);
+    let url = Url::parse(&fixed).map_err(|_| ConfigIssue::InvalidField {
+        protocol: P,
+        field: "link",
+    })?;
+    let host = host_of(&url, P)?;
+    let port = url
+        .port_or_known_default()
+        .ok_or(ConfigIssue::MissingField {
+            protocol: P,
+            field: "port",
+        })?;
+    let (user, pw) = userinfo_pair(&url);
+    let mut settings = BTreeMap::new();
+    let mut secrets = BTreeMap::new();
+    if tls {
+        settings.insert("security".into(), "tls".into());
+    }
+    if !user.is_empty() {
+        settings.insert("username".into(), user);
+        secrets.insert("password".into(), Secret::new(pw.unwrap_or_default()));
+    }
+    Ok(Profile {
+        name: clean_name(url.fragment().unwrap_or(""), &host),
+        protocol: Protocol::HttpProxy,
+        host,
+        port,
+        settings,
+        secrets,
+    })
+}
+
+fn ssh(text: &str) -> Result<Profile, ConfigIssue> {
+    const P: &str = "SSH";
+    let url = Url::parse(text).map_err(|_| ConfigIssue::InvalidField {
+        protocol: P,
+        field: "link",
+    })?;
+    let host = host_of(&url, P)?;
+    let port = url.port().unwrap_or(22);
+    let (user, pw) = userinfo_pair(&url);
+    if user.is_empty() {
+        return Err(ConfigIssue::MissingField {
+            protocol: P,
+            field: "user",
+        });
+    }
+    let pw = pw.ok_or(ConfigIssue::MissingField {
+        protocol: P,
+        field: "password",
+    })?;
+    let mut settings = BTreeMap::new();
+    settings.insert("username".into(), user);
+    let mut secrets = BTreeMap::new();
+    secrets.insert("password".into(), Secret::new(pw));
+    Ok(Profile {
+        name: clean_name(url.fragment().unwrap_or(""), &host),
+        protocol: Protocol::Ssh,
+        host,
+        port,
+        settings,
+        secrets,
+    })
+}
+
+/// `wireguard://<private key>@host:port?publickey=..&address=..&reserved=1,2,3&mtu=..#name`
+fn wireguard_uri(text: &str) -> Result<Profile, ConfigIssue> {
+    const P: &str = "WireGuard";
+    let url = Url::parse(text).map_err(|_| ConfigIssue::InvalidField {
+        protocol: P,
+        field: "link",
+    })?;
+    let host = host_of(&url, P)?;
+    let port = port_of(&url, P)?;
+    let key32 = |v: &str| STANDARD.decode(v).map(|b| b.len() == 32).unwrap_or(false);
+    let private = percent_decode_str(url.username())
+        .decode_utf8_lossy()
+        .into_owned();
+    if private.is_empty() {
+        return Err(ConfigIssue::MissingField {
+            protocol: P,
+            field: "PrivateKey",
+        });
+    }
+    if !key32(&private) {
+        return Err(ConfigIssue::InvalidField {
+            protocol: P,
+            field: "PrivateKey",
+        });
+    }
+    let q = keep_params(&url);
+    let public = q.get("publickey").ok_or(ConfigIssue::MissingField {
+        protocol: P,
+        field: "PublicKey",
+    })?;
+    if !key32(public) {
+        return Err(ConfigIssue::InvalidField {
+            protocol: P,
+            field: "PublicKey",
+        });
+    }
+    let address = q.get("address").ok_or(ConfigIssue::MissingField {
+        protocol: P,
+        field: "Address",
+    })?;
+    let mut settings = BTreeMap::new();
+    settings.insert("address".into(), address.clone());
+    settings.insert("allowed_ips".into(), "0.0.0.0/0, ::/0".into());
+    settings.insert("peer_public_key".into(), public.clone());
+    for k in ["mtu", "reserved", "keepalive"] {
+        if let Some(v) = q.get(k) {
+            settings.insert(
+                if k == "keepalive" {
+                    "persistent_keepalive".into()
+                } else {
+                    k.into()
+                },
+                v.clone(),
+            );
+        }
+    }
+    let mut secrets = BTreeMap::new();
+    secrets.insert("private_key".into(), Secret::new(private));
+    Ok(Profile {
+        name: clean_name(url.fragment().unwrap_or(""), &host),
+        protocol: Protocol::WireGuard,
+        host,
+        port,
+        settings,
+        secrets,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,5 +725,46 @@ mod tests {
         let x = p(&format!("trojan://pw@a.example.com:1#%0A{long}")).unwrap();
         assert_eq!(x.name.chars().count(), 100);
         assert!(!x.name.contains('\n'));
+    }
+
+    #[test]
+    fn extra_protocols_parse() {
+        let t = p(&format!("tuic://{UUID}:pw1234@t.example.com:443?congestion_control=bbr&udp_relay_mode=native&sni=t.example.com#T")).unwrap();
+        assert_eq!(t.protocol, Protocol::Tuic);
+        assert_eq!(t.secrets["password"].expose(), "pw1234");
+        let h = p("hysteria://h.example.com:443?auth=secret1&peer=sni.example.com&insecure=0&upmbps=50&downmbps=100#H").unwrap();
+        assert_eq!(
+            h.settings.get("sni").map(String::as_str),
+            Some("sni.example.com")
+        );
+        let s = p("socks5://u:p@s.example.com:1080#S").unwrap();
+        assert_eq!((s.protocol, s.port), (Protocol::Socks, 1080));
+        let enc = STANDARD.encode("user:pass");
+        assert_eq!(
+            p(&format!("socks://{enc}@s.example.com:1080"))
+                .unwrap()
+                .secrets["password"]
+                .expose(),
+            "pass"
+        );
+        assert_eq!(p("ssh://root:pw@h.example.com#x").unwrap().port, 22);
+        assert_eq!(
+            p("anytls://pw1234@a.example.com:443?sni=a.example.com")
+                .unwrap()
+                .protocol,
+            Protocol::AnyTls
+        );
+        assert!(p("http-proxy://u:p@h.example.com:8080").is_ok());
+    }
+
+    #[test]
+    fn wireguard_uri_parses_and_validates() {
+        let k = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        let ok = p(&format!("wireguard://{}@w.example.com:51820?publickey={}&address=10.0.0.2/32&reserved=1,2,3&mtu=1280#W", k.replace('=', "%3D"), k.replace('=', "%3D"))).unwrap();
+        assert_eq!(
+            ok.settings.get("reserved").map(String::as_str),
+            Some("1,2,3")
+        );
+        assert!(p("wireguard://short@w.example.com:1?publickey=x&address=1.1.1.1/32").is_err());
     }
 }

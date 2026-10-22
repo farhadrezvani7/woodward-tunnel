@@ -82,6 +82,24 @@ fn transport(p: &Profile) -> Option<Value> {
 }
 
 fn outbound(p: &Profile, w: &mut Vec<Warning>) -> Result<Value, EngineError> {
+    // Imported sing-box JSON is passed through (already stripped of dialer/file options at import).
+    if let Some(raw) = p.secrets.get("outbound_json") {
+        let mut v: Value = serde_json::from_str(raw.expose())
+            .map_err(|_| EngineError::Profile("outbound_json"))?;
+        let obj = v
+            .as_object_mut()
+            .ok_or(EngineError::Profile("outbound_json"))?;
+        obj.insert("tag".into(), json!("proxy"));
+        if obj
+            .get("tls")
+            .and_then(|t| t.get("insecure"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            w.push(Warning::InsecureTls);
+        }
+        return Ok(v);
+    }
     let mut o = Map::new();
     o.insert("tag".into(), json!("proxy"));
     o.insert("server".into(), json!(p.host));
@@ -149,6 +167,81 @@ fn outbound(p: &Profile, w: &mut Vec<Warning>) -> Result<Value, EngineError> {
                 o.insert("obfs".into(), json!({"type": "salamander", "password": s(p, "obfs-password").unwrap_or_default()}));
             }
         }
+        Protocol::Tuic => {
+            o.insert("type".into(), json!("tuic"));
+            o.insert("uuid".into(), json!(secret(p, "uuid")?));
+            o.insert("password".into(), json!(secret(p, "password")?));
+            o.insert(
+                "congestion_control".into(),
+                json!(s(p, "congestion_control").unwrap_or_else(|| "bbr".into())),
+            );
+            if let Some(m) = s(p, "udp_relay_mode") {
+                o.insert("udp_relay_mode".into(), json!(m));
+            }
+            if let Some(t) = tls(p, w, true) {
+                o.insert("tls".into(), t);
+            }
+        }
+        Protocol::Hysteria1 => {
+            o.insert("type".into(), json!("hysteria"));
+            if let Some(a) = p.secrets.get("password") {
+                o.insert("auth_str".into(), json!(a.expose()));
+            }
+            let mbps = |k: &str| {
+                s(p, k).and_then(|v| {
+                    v.trim_end_matches(|c: char| !c.is_ascii_digit())
+                        .parse::<u32>()
+                        .ok()
+                })
+            };
+            o.insert(
+                "up_mbps".into(),
+                json!(mbps("upmbps").or_else(|| mbps("up")).unwrap_or(50)),
+            );
+            o.insert(
+                "down_mbps".into(),
+                json!(mbps("downmbps").or_else(|| mbps("down")).unwrap_or(100)),
+            );
+            if let Some(x) = s(p, "obfs") {
+                o.insert("obfs".into(), json!(x));
+            }
+            if let Some(t) = tls(p, w, true) {
+                o.insert("tls".into(), t);
+            }
+        }
+        Protocol::AnyTls => {
+            o.insert("type".into(), json!("anytls"));
+            o.insert("password".into(), json!(secret(p, "password")?));
+            if let Some(t) = tls(p, w, true) {
+                o.insert("tls".into(), t);
+            }
+        }
+        Protocol::Socks => {
+            o.insert("type".into(), json!("socks"));
+            o.insert("version".into(), json!("5"));
+            if let Some(u) = s(p, "username") {
+                o.insert("username".into(), json!(u));
+                o.insert("password".into(), json!(secret(p, "password")?));
+            }
+        }
+        Protocol::HttpProxy => {
+            o.insert("type".into(), json!("http"));
+            if let Some(u) = s(p, "username") {
+                o.insert("username".into(), json!(u));
+                o.insert("password".into(), json!(secret(p, "password")?));
+            }
+            if let Some(t) = tls(p, w, false) {
+                o.insert("tls".into(), t);
+            }
+        }
+        Protocol::Ssh => {
+            o.insert("type".into(), json!("ssh"));
+            o.insert(
+                "user".into(),
+                json!(s(p, "username").ok_or(EngineError::Profile("username"))?),
+            );
+            o.insert("password".into(), json!(secret(p, "password")?));
+        }
         Protocol::WireGuard | Protocol::AmneziaWg | Protocol::OpenVpn => {
             return Err(EngineError::NotSupported(p.protocol))
         }
@@ -177,6 +270,18 @@ fn wireguard_endpoint(p: &Profile) -> Result<Value, EngineError> {
     }
     if let Some(k) = s(p, "persistent_keepalive").and_then(|k| k.parse::<u32>().ok()) {
         peer["persistent_keepalive_interval"] = json!(k);
+    }
+    if let Some(r) = s(p, "reserved") {
+        let v: Vec<u8> = r.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if v.len() == 3 {
+            peer["reserved"] = json!(v);
+        }
+    }
+    if let Some(r) = s(p, "reserved") {
+        let v: Vec<u8> = r.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if v.len() == 3 {
+            peer["reserved"] = json!(v);
+        }
     }
     let mut e = json!({"type": "wireguard", "tag": "proxy", "address": addrs, "private_key": secret(p, "private_key")?, "peers": [peer]});
     if let Some(m) = s(p, "mtu").and_then(|m| m.parse::<u32>().ok()) {

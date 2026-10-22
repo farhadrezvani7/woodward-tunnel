@@ -2,10 +2,13 @@
 //! Parsers never execute or follow anything in the input; they only read and validate.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+mod analyze;
+mod formats;
 mod openvpn;
 mod uri;
 mod wireguard;
 
+pub use analyze::{analyze, Analysis, Issue};
 use core_model::{ConfigIssue, Profile};
 
 /// Hard cap on input size; real configs are a few KB.
