@@ -1,0 +1,9 @@
+[package]
+name = "core-log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+core-model = { path = "../core-model" }
+[lints]
+workspace = true

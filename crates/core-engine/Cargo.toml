@@ -1,0 +1,15 @@
+[package]
+name = "core-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+core-model = { path = "../core-model" }
+core-log = { path = "../core-log" }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["process", "io-util", "time", "rt", "macros", "net", "sync"] }
+[dev-dependencies]
+core-import = { path = "../core-import" }
+[lints]
+workspace = true
