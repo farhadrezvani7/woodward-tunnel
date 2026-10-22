@@ -1,0 +1,22 @@
+[package]
+name = "wt-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wt"
+path = "src/main.rs"
+
+[dependencies]
+core-app = { path = "../core-app" }
+core-keyring = { path = "../core-keyring" }
+core-engine = { path = "../core-engine" }
+core-model = { path = "../core-model" }
+core-store = { path = "../core-store" }
+core-policy = { path = "../core-policy" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
+
+[lints]
+workspace = true
