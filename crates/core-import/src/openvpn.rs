@@ -86,23 +86,18 @@ const BLOCKS: &[&str] = &[
 ];
 /// Blocks whose content is secret.
 const SECRET_BLOCKS: &[&str] = &["key", "tls-auth", "tls-crypt", "tls-crypt-v2", "pkcs12"];
-/// Rejected with an explicit reason; anything not allowlisted is rejected anyway.
-const DANGEROUS: &[&str] = &[
+/// Dropped on import: they only matter to scripts or process housekeeping that we never run;
+/// the renderer forces `script-security 0` and the app manages DNS and routes itself.
+const DROPPED: &[&str] = &[
     "up",
     "down",
+    "up-restart",
     "route-up",
     "route-pre-down",
     "ipchange",
-    "tls-verify",
-    "auth-user-pass-verify",
-    "client-connect",
-    "client-disconnect",
-    "learn-address",
-    "plugin",
     "script-security",
     "setenv",
     "management",
-    "config",
     "writepid",
     "log",
     "log-append",
@@ -112,9 +107,18 @@ const DANGEROUS: &[&str] = &[
     "chroot",
     "daemon",
     "syslog",
+    "learn-address",
+];
+/// Rejected: they weaken verification, load code, or read local files named by the profile.
+const DANGEROUS: &[&str] = &[
+    "tls-verify",
+    "auth-user-pass-verify",
+    "client-connect",
+    "client-disconnect",
+    "plugin",
+    "config",
     "engine",
     "ca-path",
-    "up-restart",
 ];
 const MAX_BLOCK: usize = 64 * 1024;
 
@@ -182,19 +186,19 @@ pub fn parse(text: &str) -> Result<Profile, ConfigIssue> {
                 field: "script/file directive",
             });
         }
+        if DROPPED.contains(&key) {
+            continue;
+        }
         if !ALLOWED.contains(&key) {
             return Err(ConfigIssue::InvalidField {
                 protocol: P,
                 field: "directive",
             });
         }
-        let args: Vec<&str> = parts.collect();
-        // Inline-or-file references to local paths are not allowed: `auth-user-pass <file>` reads a file.
-        if key == "auth-user-pass" && !args.is_empty() {
-            return Err(ConfigIssue::InvalidField {
-                protocol: P,
-                field: "script/file directive",
-            });
+        let mut args: Vec<&str> = parts.collect();
+        // `auth-user-pass <file>` would read a local file; credentials come from the app instead.
+        if key == "auth-user-pass" {
+            args.clear();
         }
         if key == "remote" && remote.is_none() {
             let host = args.first().ok_or(ConfigIssue::MissingField {
@@ -261,17 +265,12 @@ mod tests {
     #[test]
     fn rejects_every_dangerous_directive() {
         for d in [
-            "up /tmp/x.sh",
-            "down x",
-            "script-security 2",
             "plugin /lib/x.so",
-            "management 127.0.0.1 7505",
-            "auth-user-pass /etc/shadow",
-            "log /tmp/l",
             "tls-verify x",
-            "setenv A B",
             "config /etc/passwd",
-            "writepid /tmp/p",
+            "auth-user-pass-verify x via-env",
+            "ca-path /etc/ssl",
+            "engine x",
         ] {
             let text = format!("{GOOD}{d}\n");
             assert!(
@@ -279,6 +278,23 @@ mod tests {
                 "{d}"
             );
         }
+    }
+
+    #[test]
+    fn script_directives_are_dropped_not_kept() {
+        let text = format!("{GOOD}script-security 2\nup /etc/openvpn/update-resolv-conf\ndown /x\nsetenv A B\nlog /tmp/l\nauth-user-pass /etc/shadow\n");
+        let p = parse(&text).unwrap();
+        let d = &p.settings["directives"];
+        for gone in [
+            "script-security",
+            "update-resolv-conf",
+            "setenv",
+            "/tmp/l",
+            "/etc/shadow",
+        ] {
+            assert!(!d.contains(gone), "{gone} survived: {d}");
+        }
+        assert!(d.lines().any(|l| l == "auth-user-pass"));
     }
 
     #[test]

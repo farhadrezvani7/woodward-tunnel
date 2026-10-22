@@ -290,18 +290,58 @@ fn wireguard_endpoint(p: &Profile) -> Result<Value, EngineError> {
     Ok(e)
 }
 
-/// Build the full config. `dns` are resolvers reached through the tunnel (never the system resolver).
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    pub mode: Option<Mode>,
+    pub dns: Vec<String>,
+    /// Local SOCKS5 listener of a helper engine (AmneziaWG); the "proxy" outbound points here.
+    pub upstream_socks: Option<std::net::SocketAddr>,
+    /// Addresses that must bypass the tunnel (e.g. a helper engine's server endpoint).
+    pub bypass: Vec<std::net::IpAddr>,
+}
+
 pub fn build(p: &Profile, mode: &Mode, dns: &[String]) -> Result<Built, EngineError> {
+    build_with(
+        p,
+        &Options {
+            mode: Some(mode.clone()),
+            dns: dns.to_vec(),
+            ..Default::default()
+        },
+    )
+}
+
+/// Build the full config. `dns` are resolvers reached through the tunnel (never the system resolver).
+pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
+    let mode = opts.mode.as_ref().ok_or(EngineError::Profile("mode"))?;
+    let dns = &opts.dns;
     let mut warnings = Vec::new();
     let mut cfg = Map::new();
     cfg.insert("log".into(), json!({"level": "warn", "timestamp": true}));
 
     let inbound = match mode {
-        Mode::Tun => json!({
-            "type": "tun", "tag": "tun-in",
-            "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-            "auto_route": true, "strict_route": true,
-        }),
+        Mode::Tun => {
+            let mut t = json!({
+                "type": "tun", "tag": "tun-in",
+                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                "auto_route": true, "strict_route": true,
+            });
+            if !opts.bypass.is_empty() {
+                let ex: Vec<String> = opts
+                    .bypass
+                    .iter()
+                    .map(|ip| {
+                        if ip.is_ipv4() {
+                            format!("{ip}/32")
+                        } else {
+                            format!("{ip}/128")
+                        }
+                    })
+                    .collect();
+                t["route_exclude_address"] = json!(ex);
+            }
+            t
+        }
         Mode::Proxy { socks_port } => {
             json!({"type": "socks", "tag": "socks-in", "listen": "127.0.0.1", "listen_port": socks_port})
         }
@@ -311,7 +351,12 @@ pub fn build(p: &Profile, mode: &Mode, dns: &[String]) -> Result<Built, EngineEr
     let dns_server = dns.first().cloned().unwrap_or_else(|| "1.1.1.1".into());
     cfg.insert("dns".into(), json!({"servers": [{"type": "udp", "tag": "remote", "server": dns_server, "detour": "proxy"}], "final": "remote"}));
 
-    if matches!(p.protocol, Protocol::WireGuard) {
+    if matches!(p.protocol, Protocol::AmneziaWg) {
+        let up = opts
+            .upstream_socks
+            .ok_or(EngineError::Profile("upstream_socks"))?;
+        cfg.insert("outbounds".into(), json!([{"type": "socks", "tag": "proxy", "server": up.ip().to_string(), "server_port": up.port(), "version": "5"}, {"type": "direct", "tag": "direct"}]));
+    } else if matches!(p.protocol, Protocol::WireGuard) {
         cfg.insert("endpoints".into(), json!([wireguard_endpoint(p)?]));
         cfg.insert(
             "outbounds".into(),

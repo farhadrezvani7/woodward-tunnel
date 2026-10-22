@@ -2,7 +2,10 @@
 //! for each backend, the sidecar process supervisor, and tunnel-verification probes.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod awg;
+pub mod openvpn;
 pub mod probe;
+pub mod runner;
 pub mod sidecar;
 pub mod singbox;
 
