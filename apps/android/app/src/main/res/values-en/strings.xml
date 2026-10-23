@@ -85,5 +85,11 @@
     <string name="settings_about_body">App version %1$s · engine %2$s</string>
     <string name="settings_verify_title">Check internet after connecting</string>
     <string name="settings_verify_body">When off, \"Connected\" is shown as soon as the tunnel starts. Turn it off for configurations that only route a private network.</string>
+    <string name="settings_diag_title">Diagnostic report</string>
+    <string name="settings_diag_body">A report without configuration names, server addresses or passwords that you can send to support. Nothing is sent automatically.</string>
+    <string name="settings_diag_button">Create report</string>
+    <string name="settings_diag_note">Read the text before sending it. Only you decide whether to share it.</string>
+    <string name="settings_diag_copy">Copy</string>
+    <string name="settings_diag_copied">Copied.</string>
     <string name="settings_saved">Saved.</string>
 </resources>

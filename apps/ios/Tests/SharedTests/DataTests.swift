@@ -110,3 +110,30 @@ final class SnifferTests: XCTestCase {
         XCTAssertEqual(ImageSniffer.sniff(Data()), .other)
     }
 }
+
+final class LogRingTests: XCTestCase {
+    func testRedaction() {
+        let r = LogRedactor.redact("connect to 203.0.113.7:443 via https://sub.example.org/x?token=abc key AbCdEfGhIjKlMnOpQrStUvWxYz012345 id 123e4567-e89b-12d3-a456-426614174000 v6 2001:db8::1")
+        XCTAssertFalse(r.contains("203.0.113.7"))
+        XCTAssertFalse(r.contains("example.org"))
+        XCTAssertFalse(r.contains("AbCdEf"))
+        XCTAssertFalse(r.contains("2001:db8"))
+        XCTAssertFalse(r.contains("123e4567"))
+        XCTAssertEqual(LogRedactor.redact("state=connected code=tunnel_start_failed"), "state=connected code=tunnel_start_failed")
+        XCTAssertLessThanOrEqual(LogRedactor.redact(String(repeating: "a b ", count: 200)).count, 300)
+    }
+
+    func testRingKeepsNewestAndSurvivesMissingFile() {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wt-ring-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let ring = LogRing(directory: dir, capacity: 3)
+        XCTAssertEqual(ring.tail(), [])
+        for i in 1...5 { ring.append("line \(i)") }
+        let t = ring.tail()
+        XCTAssertEqual(t.count, 3)
+        XCTAssertTrue(t[0].hasSuffix("line 3"))
+        XCTAssertTrue(t[2].hasSuffix("line 5"))
+        ring.clear()
+        XCTAssertEqual(ring.tail(), [])
+    }
+}

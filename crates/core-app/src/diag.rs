@@ -51,7 +51,22 @@ fn mask_ips(line: &str) -> String {
     out
 }
 
+/// Report for desktop builds, where engines are separate programs next to the app.
 pub fn report(app: &App, status: Option<&Status>, log_tail: &[String], bins: &Binaries) -> String {
+    render(app, status, log_tail, Some(bins))
+}
+
+/// Report for mobile builds, where sing-box and the AmneziaWG helper are linked into the app.
+pub fn report_embedded(app: &App, status: Option<&Status>, log_tail: &[String]) -> String {
+    render(app, status, log_tail, None)
+}
+
+fn render(
+    app: &App,
+    status: Option<&Status>,
+    log_tail: &[String],
+    bins: Option<&Binaries>,
+) -> String {
     let mut out = String::new();
     out.push_str("woodward-tunnel diagnostic report (review before sharing)\n");
     out.push_str(&format!(
@@ -80,22 +95,27 @@ pub fn report(app: &App, status: Option<&Status>, log_tail: &[String], bins: &Bi
     }
 
     out.push_str("engines:\n");
-    out.push_str(&format!(
-        "  sing-box: {}\n",
-        first_line(&bins.sing_box, "version")
-    ));
-    out.push_str(&format!(
-        "  openvpn: {}\n",
-        first_line(&bins.openvpn, "--version")
-    ));
-    let awg = std::process::Command::new(&bins.awg_socks)
-        .arg("--check")
-        .output()
-        .is_ok();
-    out.push_str(&format!(
-        "  awg-socks: {}\n",
-        if awg { "present" } else { "missing" }
-    ));
+    match bins {
+        Some(bins) => {
+            out.push_str(&format!(
+                "  sing-box: {}\n",
+                first_line(&bins.sing_box, "version")
+            ));
+            out.push_str(&format!(
+                "  openvpn: {}\n",
+                first_line(&bins.openvpn, "--version")
+            ));
+            let awg = std::process::Command::new(&bins.awg_socks)
+                .arg("--check")
+                .output()
+                .is_ok();
+            out.push_str(&format!(
+                "  awg-socks: {}\n",
+                if awg { "present" } else { "missing" }
+            ));
+        }
+        None => out.push_str("  built into the app\n"),
+    }
 
     if let Some(s) = status {
         out.push_str(&format!("state: {:?}\n", s.state));
@@ -159,6 +179,7 @@ mod tests {
             "sing-box: connected to 203.0.113.77:443 via 10.0.0.2".to_string(),
         ];
         let rep = report(&app, None, &log, &Binaries::discover());
+        assert!(report_embedded(&app, None, &log).contains("built into the app"));
         for leak in [
             "s3cret-pass-99",
             "vpn.private-host.example",

@@ -133,9 +133,11 @@ class TunnelService : VpnService(), PlatformInterface {
 
     private fun start(profileId: String) {
         TunnelState.set(ConnState.Connecting)
+        EngineLog.add("start requested")
         val plan = try {
             Core.get().launchPlan(profileId, Prefs.dnsServers(this))
         } catch (e: Exception) {
+            EngineLog.add("launch plan failed")
             fail(R.string.err_core, coreMessage = e.coreMessage())
             return
         }
@@ -174,6 +176,7 @@ class TunnelService : VpnService(), PlatformInterface {
             server.start()
             server.startOrReloadService(config, OverrideOptions())
         } catch (e: Throwable) {
+            EngineLog.add("engine start failed: " + (e.message ?: e.javaClass.simpleName))
             fail(R.string.err_engine, technical = e.message)
             return
         } finally {
@@ -194,9 +197,11 @@ class TunnelService : VpnService(), PlatformInterface {
         }
         if (stopRequested) return
         if (!ok) {
+            EngineLog.add("internet check failed")
             fail(R.string.err_no_internet)
             return
         }
+        EngineLog.add("connected")
         TunnelState.set(ConnState.Connected(SystemClock.elapsedRealtime(), insecure))
         showForeground(getString(R.string.notif_text))
     }
@@ -209,6 +214,7 @@ class TunnelService : VpnService(), PlatformInterface {
 
     private fun teardown(keepError: Boolean) {
         if (!running) return // already torn down (a failure path ran first)
+        EngineLog.add("stopping")
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
@@ -270,7 +276,9 @@ class TunnelService : VpnService(), PlatformInterface {
         override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus()
         override fun setSystemProxyEnabled(enabled: Boolean) {}
         override fun triggerNativeCrash() {}
-        override fun writeDebugMessage(message: String?) {} // engine text is never logged
+        override fun writeDebugMessage(message: String?) {
+            if (message != null) EngineLog.add(message) // memory only, never logcat
+        }
         override fun connectSSHAgent(): Int = -1
     }
 

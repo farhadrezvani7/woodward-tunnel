@@ -101,6 +101,11 @@ final class CoreService {
         try await run { [app] in try app.delete(id: id) }
     }
 
+    /// Shareable support text (counts, versions, redacted log tail). Never sent anywhere by the app.
+    func diagnosticReport(logTail: [String]) async throws -> String {
+        try await run { [app] in app.diagnosticReport(logTail: logTail) }
+    }
+
     func launchDecision(profileID: String, dns: [String]) async throws -> LaunchDecision {
         try await run { [app] in
             switch try app.launchPlan(id: profileID, dns: dns) {

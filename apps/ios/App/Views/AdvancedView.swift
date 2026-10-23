@@ -8,6 +8,8 @@ struct AdvancedView: View {
     @State private var dnsText = ""
     @State private var dnsInvalid = false
     @State private var confirmReset = false
+    @State private var report: String?
+    @State private var building = false
 
     var body: some View {
         NavigationStack {
@@ -41,6 +43,19 @@ struct AdvancedView: View {
                 }
 
                 Section {
+                    Button {
+                        building = true
+                        Task {
+                            report = await model.buildDiagnosticReport()
+                            building = false
+                        }
+                    } label: {
+                        HStack {
+                            Text(L("advanced.report.button"))
+                            if building { Spacer(); ProgressView() }
+                        }
+                    }
+                    .disabled(building)
                     Button(L("advanced.diagnostics.copy")) {
                         UIPasteboard.general.string = model.diagnosticsText
                         model.show(.success, L("advanced.diagnostics.copied"))
@@ -61,6 +76,9 @@ struct AdvancedView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button(L("common.done")) { dismiss() } }
+            }
+            .sheet(isPresented: Binding(get: { report != nil }, set: { if !$0 { report = nil } })) {
+                DiagnosticReportSheet(text: report ?? "")
             }
             .onAppear { dnsText = model.dnsServers.joined(separator: ", ") }
             .confirmationDialog(L("advanced.reset.title"), isPresented: $confirmReset, titleVisibility: .visible) {
@@ -87,5 +105,39 @@ struct AdvancedView: View {
         let v = info?["CFBundleShortVersionString"] as? String ?? "?"
         let b = info?["CFBundleVersion"] as? String ?? "?"
         return "\(v) (\(b))"
+    }
+}
+
+/// Shows the report so the user can read exactly what would be shared. Nothing is sent by the app.
+struct DiagnosticReportSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let text: String
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(L("advanced.report.note")).font(.footnote).foregroundStyle(.secondary)
+                    Text(verbatim: text)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .environment(\.layoutDirection, .leftToRight)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding()
+            }
+            .navigationTitle(L("advanced.report.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button(L("common.done")) { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    Button(L("advanced.report.copy")) {
+                        UIPasteboard.general.string = text
+                        model.show(.success, L("advanced.diagnostics.copied"))
+                    }
+                }
+            }
+        }
     }
 }

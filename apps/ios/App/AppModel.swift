@@ -217,6 +217,7 @@ final class AppModel: ObservableObject {
         userStopped = false
         isPreparing = true
         connectRequestedAt = Date()
+        logEvent("connect requested")
         apply { $0.userRequestedConnect() }
         Task {
             defer { isPreparing = false }
@@ -256,6 +257,7 @@ final class AppModel: ObservableObject {
 
     func disconnect() {
         userStopped = true
+        logEvent("disconnect requested")
         apply { $0.userRequestedDisconnect() }
         tunnel.stop()
         if !isPreparing, tunnel.currentStatus == .disconnected || tunnel.currentStatus == .invalid {
@@ -296,10 +298,38 @@ final class AppModel: ObservableObject {
     }
 
     private func apply(_ change: (inout ConnectionStateMachine) -> Void) {
+        let before = machine.state
         change(&machine)
         connection = machine.state
+        if machine.state != before {
+            if case .failed(let kind) = machine.state {
+                logEvent("state=failed code=\(kind.code)")
+            } else {
+                logEvent("state=\(machine.state.statusKey)")
+            }
+        }
         if case .failed = machine.state {
             UIAccessibility.post(notification: .announcement, argument: L("state.failed"))
+        }
+    }
+
+    // MARK: diagnostics
+
+    private var logRing: LogRing? { TunnelHandoff.inAppGroup(AppConstants.appGroupID)?.log }
+
+    private func logEvent(_ line: String) {
+        logRing?.append("app " + line)
+    }
+
+    /// Builds the shareable report from the core plus the redacted lifecycle log kept by the
+    /// app and the extension. Returns nil text only if the core is unavailable.
+    func buildDiagnosticReport() async -> String {
+        let tail = logRing?.tail(max: 100) ?? []
+        guard let core else { return diagnosticsText }
+        do {
+            return try await core.diagnosticReport(logTail: tail)
+        } catch {
+            return diagnosticsText
         }
     }
 

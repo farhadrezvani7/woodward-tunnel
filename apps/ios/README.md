@@ -98,7 +98,7 @@ re-sync it (the compiler will tell you).
 ### Checking on Linux
 
 ```sh
-apps/ios/scripts/typecheck-linux.sh /path/to/swift          # builds and runs 16 logic tests,
+apps/ios/scripts/typecheck-linux.sh /path/to/swift          # builds and runs 18 logic tests,
                                                             # syntax-parses every Swift file
 WT_BINDINGS=<dir> apps/ios/scripts/typecheck-linux.sh ...   # also type-checks App/Core against
                                                             # freshly generated UniFFI bindings
@@ -112,7 +112,7 @@ On very new distributions the Swift 6.0.3 toolchain needs a `libxml2.so.2` symli
 
 Checked on Linux with Swift 6.0.3:
 
-* `Shared/Logic` and `Shared/Platform` (minus Security) compile, and 16 XCTest cases pass
+* `Shared/Logic` and `Shared/Platform` (minus Security) compile, and 18 XCTest cases pass
   (state machine, failure mapping, secret vault round trip, handoff files, grouping, import
   headline, DNS parsing, image sniffing, elapsed formatter).
 * `App/Core/CoreService.swift` and `AppSecretCallbacks.swift` type-check against bindings
@@ -124,7 +124,7 @@ Checked on Linux with Swift 6.0.3:
   Swift import rules and SagerNet's open-source sing-box-for-apple).
 * After the core FFI change: bindings regenerated from current `core-ffi` (`Failed(reason, reasonEn)`,
   `FfiProblem.messageEn/code`, `amneziaWg` with four fields); `App/Core` type-checks against them and
-  16 logic tests pass (new: helper config in handoff, problem language selection).
+  18 logic tests pass (new: helper config in handoff, problem language selection).
 * `gobind -lang=objc` on sing-box v1.14.3 plus `engines/awg-socks/mobile` together (module resolved
   with a `replace` directive, `go list` succeeded) produced `AwgmobileStart(NSString*, NSError**)`
   and `AwgmobileStop(void)` next to the Libbox API, the names `AmneziaHelper.swift` uses. XcodeGen
@@ -141,6 +141,12 @@ Checked on Linux with Swift 6.0.3:
 * Everything that imports SwiftUI, UIKit, AVFoundation, PhotosUI, NetworkExtension, Network or
   Libbox: all of `App/Views`, `App/AppModel.swift`, `App/Tunnel`, `PacketTunnel/*`. Expect
   compile errors on the first Xcode build (type inference, availability, `Sendable` warnings).
+* Diagnostic report (Advanced settings): `WtApp.diagnosticReport(logTail:)` type-checks against the
+  regenerated bindings, and the redactor / ring buffer (`LogRing`) are unit-tested on Linux. Not
+  verified: the SwiftUI sheet, writing the ring file from the extension through the app group
+  (needs the entitlement and device), whether the Rust report is useful with iOS-only context, and
+  that the redaction regexes cover every line the extension may log (it logs only lifecycle events and
+  failure codes by design). The report is shown to the user and only copied on request; nothing is sent.
 * The AmneziaWG path: `gomobile bind` with both packages in one framework, whether the umbrella
   header exposes `Awgmobile*` through `import Libbox`, the `go.mod` edit in `build-ios.sh`, and
   actual helper plus sing-box operation and memory use on a device.

@@ -25,6 +25,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?) async throws {
         let handoff = TunnelHandoff.inAppGroup(AppConstants.appGroupID)
         self.handoff = handoff
+        handoff?.log.append("extension start")
         do {
             try startCore(handoff: handoff)
         } catch {
@@ -99,6 +100,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func failure(_ code: FailureMapping.ExtensionCode, _ note: String) -> NSError {
         Self.log.error("\(note, privacy: .public)")
+        handoff?.log.append("extension \(note)")
         return NSError(domain: FailureMapping.extensionErrorDomain, code: code.rawValue)
     }
 
@@ -114,6 +116,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {
+        handoff?.log.append("extension stop reason=\(reason.rawValue)")
         stopCore()
         handoff?.clearConfig()
     }

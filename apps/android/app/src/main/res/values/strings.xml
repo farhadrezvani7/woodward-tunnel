@@ -86,5 +86,11 @@
     <string name="settings_about_body">نسخهٔ برنامه %1$s · موتور %2$s</string>
     <string name="settings_verify_title">بررسی اینترنت پس از اتصال</string>
     <string name="settings_verify_body">اگر خاموش باشد، به‌محض راه‌افتادن تونل «متصل» نشان داده می‌شود. برای کانفیگ‌هایی که فقط یک شبکهٔ خصوصی را مسیریابی می‌کنند خاموش کنید.</string>
+    <string name="settings_diag_title">گزارش عیب‌یابی</string>
+    <string name="settings_diag_body">گزارشی بدون نام کانفیگ، آدرس سرور و رمز برای ارسال به پشتیبانی. چیزی خودکار ارسال نمی‌شود.</string>
+    <string name="settings_diag_button">ساخت گزارش</string>
+    <string name="settings_diag_note">پیش از ارسال، متن را بخوانید. فقط خودتان تصمیم می‌گیرید آن را بفرستید.</string>
+    <string name="settings_diag_copy">کپی</string>
+    <string name="settings_diag_copied">کپی شد.</string>
     <string name="settings_saved">ذخیره شد.</string>
 </resources>
