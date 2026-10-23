@@ -49,7 +49,7 @@ final class ConnectionStateTests: XCTestCase {
     func testFailureCodesRoundTrip() {
         let all: [FailureKind] = [.noProfile, .configInvalid, .permissionDenied, .vpnDisabled, .noNetwork,
                                   .serverUnreachable, .unsupportedEngine(.amneziaWg),
-                                  .unsupportedEngine(.openVpn), .tunnelStartFailed, .unknown]
+                                  .unsupportedEngine(.openVpn), .tunnelStartFailed, .helperStartFailed, .unknown]
         for k in all {
             XCTAssertEqual(FailureKind(code: k.code), k)
             XCTAssertTrue(k.titleKey.hasPrefix("failure."))

@@ -50,7 +50,7 @@ public final class SystemKeychainBackend: SecretBackend {
 STUB
     sed -i '1i import Foundation' "$tmp/KeychainStub.swift"
     "$SWIFTC" -typecheck -swift-version 5 -I "$tmp/inc" \
-        "$WT_BINDINGS/wtcore.swift" "$here"/App/Core/*.swift "$tmp/KeychainStub.swift" \
+        "$WT_BINDINGS/wtcore.swift" "$here"/App/Core/*.swift "$here/App/L10n.swift" "$tmp/KeychainStub.swift" \
         "$here"/Shared/Logic/*.swift 2>&1 | { grep -v "no version information available" || true; }
     echo "FFI wrapper type-checks"
 fi

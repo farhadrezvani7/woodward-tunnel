@@ -20,6 +20,7 @@ public enum FailureKind: Equatable {
     case serverUnreachable
     case unsupportedEngine(UnsupportedEngine)
     case tunnelStartFailed
+    case helperStartFailed
     case unknown
 
     /// Stable machine-readable code (used in the app-group status file).
@@ -33,6 +34,7 @@ public enum FailureKind: Equatable {
         case .serverUnreachable: return "server_unreachable"
         case .unsupportedEngine(let e): return "unsupported_" + e.rawValue
         case .tunnelStartFailed: return "tunnel_start_failed"
+        case .helperStartFailed: return "helper_start_failed"
         case .unknown: return "unknown"
         }
     }
@@ -48,6 +50,7 @@ public enum FailureKind: Equatable {
         case "unsupported_amneziawg": self = .unsupportedEngine(.amneziaWg)
         case "unsupported_openvpn": self = .unsupportedEngine(.openVpn)
         case "tunnel_start_failed": self = .tunnelStartFailed
+        case "helper_start_failed": self = .helperStartFailed
         case "unknown": self = .unknown
         default: return nil
         }

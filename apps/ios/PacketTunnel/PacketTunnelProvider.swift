@@ -11,12 +11,16 @@ import os
 /// document an exact number). libbox applies its own Go memory limit and a lower GC percent
 /// when `oomKillerEnabled` is set and it runs on iOS (see service/oomkiller in sing-box:
 /// 50 MiB limit, GC percent 50, soft limit at 80 percent).
+///
+/// AmneziaWG profiles additionally run the userspace WireGuard peer (AmneziaHelper) inside the
+/// same process and Go heap, so both share that budget: the riskiest configuration.
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private static let log = Logger(subsystem: "app.woodward.tunnel.PacketTunnel", category: "provider")
 
     private var commandServer: LibboxCommandServer?
     private lazy var platform = PlatformInterface(self)
     private var handoff: TunnelHandoff?
+    private var helperRunning = false
 
     override func startTunnel(options: [String: NSObject]?) async throws {
         let handoff = TunnelHandoff.inAppGroup(AppConstants.appGroupID)
@@ -60,6 +64,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         setup.oomKillerDisabled = false
         setup.powerReportEnabled = false
 
+        // AmneziaWG: the helper (userspace WireGuard peer, SOCKS5 on loopback) must be listening
+        // before sing-box starts, because sing-box's only outbound points at it.
+        if let helperJSON = payload.helperJSON {
+            do {
+                try AmneziaHelper.start(configJSON: helperJSON)
+                helperRunning = true
+            } catch {
+                throw failure(.helperStartFailed, "helper start")
+            }
+        }
+
         var setupError: NSError?
         LibboxSetup(setup, &setupError)
         if let setupError { throw failure(.coreSetupFailed, "setup: \(setupError.code)") }
@@ -92,6 +107,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         platform.reset()
         commandServer?.close()
         commandServer = nil
+        if helperRunning {
+            AmneziaHelper.stop()
+            helperRunning = false
+        }
     }
 
     override func stopTunnel(with reason: NEProviderStopReason) async {

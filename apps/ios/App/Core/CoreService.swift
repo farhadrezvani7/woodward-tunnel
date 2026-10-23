@@ -5,8 +5,9 @@ import Foundation
 /// Everything the UI needs comes out as the FFI-free types from Shared/Logic.
 final class CoreService {
     struct CoreFailure: LocalizedError {
-        let message: String
-        var errorDescription: String? { message }
+        let message: String     // Persian
+        let messageEn: String   // English
+        var errorDescription: String? { (!uiIsPersian && !messageEn.isEmpty) ? messageEn : message }
     }
 
     private let app: WtApp
@@ -16,8 +17,8 @@ final class CoreService {
         let dir = try CoreService.prepareDataDirectory()
         do {
             app = try WtApp(dataDir: dir.path, secrets: AppSecretCallbacks.makeDefault())
-        } catch let FfiError.Failed(message) {
-            throw CoreFailure(message: message)
+        } catch let FfiError.Failed(reason, reasonEn) {
+            throw CoreFailure(message: reason, messageEn: reasonEn)
         }
     }
 
@@ -44,8 +45,8 @@ final class CoreService {
             queue.async {
                 do {
                     continuation.resume(returning: try work())
-                } catch let FfiError.Failed(message) {
-                    continuation.resume(throwing: CoreFailure(message: message))
+                } catch let FfiError.Failed(reason, reasonEn) {
+                    continuation.resume(throwing: CoreFailure(message: reason, messageEn: reasonEn))
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -64,7 +65,7 @@ final class CoreService {
         ImportOutcome(
             addedCount: r.added.count,
             duplicates: Int(r.duplicates),
-            problems: r.problems.map { ImportOutcome.Problem(label: $0.label, message: $0.message) },
+            problems: r.problems.map { ImportOutcome.Problem(label: $0.label, message: $0.message, messageEn: $0.messageEn, code: $0.code) },
             subscriptionURLs: r.subscriptionUrls
         )
     }
@@ -105,8 +106,8 @@ final class CoreService {
             switch try app.launchPlan(id: profileID, dns: dns) {
             case .singBox(let configJson, let insecureTls):
                 return .runSingBox(configJSON: configJson, insecureTLS: insecureTls)
-            case .amneziaWg:
-                return .unsupported(.amneziaWg)
+            case .amneziaWg(let helperJson, let singboxConfigJson, _, _):
+                return .runAmneziaWG(helperJSON: helperJson, singboxConfigJSON: singboxConfigJson)
             case .openVpn:
                 return .unsupported(.openVpn)
             }

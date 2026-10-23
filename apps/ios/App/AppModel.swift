@@ -190,7 +190,7 @@ final class AppModel: ObservableObject {
         case .onlyDuplicates:
             show(.warning, L("import.duplicates"))
         case .failed:
-            show(.error, outcome.problems.first?.message ?? L("import.failed"))
+            show(.error, outcome.problems.first?.text(persian: uiIsPersian) ?? L("import.failed"))
         case .needsSubscriptionDecision:
             break // the confirmation dialog is the feedback
         case .nothingFound:
@@ -226,18 +226,9 @@ final class AppModel: ObservableObject {
                 case .unsupported(let engine):
                     apply { $0.fail(.unsupportedEngine(engine)) }
                 case .runSingBox(let json, let insecure):
-                    guard let handoff = TunnelHandoff.inAppGroup(AppConstants.appGroupID) else {
-                        apply { $0.fail(.tunnelStartFailed) }
-                        return
-                    }
-                    try handoff.writeConfig(.init(configJSON: json, insecureTLS: insecure, profileName: profile.name))
-                    connectedWithInsecureTLS = insecure
-                    try await tunnel.prepare()
-                    guard !userStopped else {
-                        handoff.clearConfig()
-                        return
-                    }
-                    try tunnel.start()
+                    try await launch(handoffPayload: .init(configJSON: json, insecureTLS: insecure, profileName: profile.name))
+                case .runAmneziaWG(let helper, let json):
+                    try await launch(handoffPayload: .init(configJSON: json, helperJSON: helper, insecureTLS: false, profileName: profile.name))
                 }
             } catch is CoreService.CoreFailure {
                 // launchPlan refused: the stored profile is not usable as it is.
@@ -246,6 +237,21 @@ final class AppModel: ObservableObject {
                 apply { $0.fail(FailureMapping.kind(for: error)) }
             }
         }
+    }
+
+    private func launch(handoffPayload: TunnelHandoff.Payload) async throws {
+        guard let handoff = TunnelHandoff.inAppGroup(AppConstants.appGroupID) else {
+            apply { $0.fail(.tunnelStartFailed) }
+            return
+        }
+        try handoff.writeConfig(handoffPayload)
+        connectedWithInsecureTLS = handoffPayload.insecureTLS
+        try await tunnel.prepare()
+        guard !userStopped else {
+            handoff.clearConfig()
+            return
+        }
+        try tunnel.start()
     }
 
     func disconnect() {

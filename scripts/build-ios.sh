@@ -94,11 +94,33 @@ stage_libbox() {
     gobin="$(go env GOPATH)/bin"
     export PATH="$gobin:$PATH"
 
-    log "gomobile bind libbox (tags: $LIBBOX_TAGS)"
     cd "$src"
+    local bind_pkgs=("./experimental/libbox")
+    local awg_marker="$GEN/awg.enabled"
+    mkdir -p "$GEN"
+    rm -f "$awg_marker"
+    local awg_dir="$ROOT/engines/awg-socks"
+    local awg_mod="github.com/farhadrezvani7/woodward-tunnel/engines/awg-socks"
+    if [ -d "$awg_dir/mobile" ]; then
+        # The AmneziaWG helper must live in the SAME gomobile framework as sing-box: two gomobile
+        # frameworks mean two Go runtimes in one process, which does not link. The clone's go.mod is
+        # edited for the build and restored afterwards.
+        log "adding the AmneziaWG helper package to the libbox framework"
+        # A previous failed run may have left the edited files behind: restore the originals first.
+        if [ -f go.mod.orig ]; then mv -f go.mod.orig go.mod; mv -f go.sum.orig go.sum; fi
+        cp go.mod go.mod.orig; cp go.sum go.sum.orig
+        GOFLAGS=-mod=mod go mod edit -require="$awg_mod@v0.0.0" -replace="$awg_mod=$awg_dir"
+        bind_pkgs+=("$awg_mod/mobile")
+        : > "$awg_marker"
+    else
+        echo "engines/awg-socks/mobile not found: building libbox without AmneziaWG support"
+    fi
+
+    log "gomobile bind libbox (tags: $LIBBOX_TAGS)"
     local version="${SING_BOX_TAG#v}"
     rm -rf Libbox.xcframework
-    gomobile bind -v \
+    GOFLAGS=-mod=mod gomobile bind -v \
+        -o Libbox.xcframework \
         -target ios,iossimulator \
         -libname=box \
         -tags-not-macos=with_low_memory \
@@ -106,7 +128,8 @@ stage_libbox() {
         -trimpath -buildvcs=false \
         -ldflags "-X github.com/sagernet/sing-box/constant.Version=$version -X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0 -s -w -buildid=" \
         -tags "$LIBBOX_TAGS" \
-        ./experimental/libbox
+        "${bind_pkgs[@]}"
+    if [ -f go.mod.orig ]; then mv -f go.mod.orig go.mod; mv -f go.sum.orig go.sum; fi
     rm -rf "$GEN/Libbox.xcframework"
     mkdir -p "$GEN"
     mv Libbox.xcframework "$GEN/Libbox.xcframework"
@@ -126,6 +149,8 @@ stage_project() {
     [ -d "$GEN/Libbox.xcframework" ] || { echo "run the 'libbox' stage first" >&2; exit 1; }
     log "xcodegen"
     cd "$IOS"
+    if [ -f "$GEN/awg.enabled" ]; then export WT_AWG=true; else export WT_AWG=false; fi
+    echo "AmneziaWG helper: $WT_AWG"
     xcodegen generate --spec project.yml
 }
 

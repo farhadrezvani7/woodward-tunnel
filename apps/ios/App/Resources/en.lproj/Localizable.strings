@@ -93,3 +93,5 @@
 "advanced.about" = "About";
 "advanced.version" = "Version";
 "advanced.about.text" = "Your data stays on this device. The app collects no data about how you use it.";
+"failure.helper_start_failed.title" = "The AmneziaWG engine could not start";
+"failure.helper_start_failed.message" = "The AmneziaWG helper did not start. Check the configuration and try again; if it keeps failing, try another configuration.";

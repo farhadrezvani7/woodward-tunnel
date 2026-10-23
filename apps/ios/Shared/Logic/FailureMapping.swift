@@ -15,6 +15,7 @@ public enum FailureMapping {
         case coreSetupFailed = 2
         case coreStartFailed = 3
         case tunnelSettingsFailed = 4
+        case helperStartFailed = 5
     }
 
     public static func kind(domain: String, code: Int) -> FailureKind {
@@ -44,6 +45,7 @@ public enum FailureMapping {
             switch ExtensionCode(rawValue: code) {
             case .missingConfig?: return .configInvalid
             case .coreSetupFailed?, .coreStartFailed?, .tunnelSettingsFailed?: return .tunnelStartFailed
+            case .helperStartFailed?: return .helperStartFailed
             case nil: return .unknown
             }
         default:

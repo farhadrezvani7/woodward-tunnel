@@ -101,7 +101,7 @@ impl Controller {
 fn classify(e: &StartError) -> FailureKind {
     match e {
         StartError::Resolve => FailureKind::Network,
-        StartError::Timeout | StartError::ExitedEarly => FailureKind::Server,
+        StartError::Timeout { .. } | StartError::ExitedEarly { .. } => FailureKind::Server,
         StartError::Engine(_) => FailureKind::Config,
         StartError::Io(k) if k.contains("permission") => FailureKind::Permission,
         StartError::Io(_) => FailureKind::Config,

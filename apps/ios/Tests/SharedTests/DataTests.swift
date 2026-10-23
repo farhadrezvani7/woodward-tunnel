@@ -33,12 +33,32 @@ final class DataTests: XCTestCase {
         let before = Date(timeIntervalSinceNow: -10)
         h.recordFailure(.tunnelStartFailed)
         XCTAssertEqual(h.lastFailure(since: before), .tunnelStartFailed)
+        h.recordFailure(.helperStartFailed)
+        XCTAssertEqual(h.lastFailure(since: before), .helperStartFailed)
         XCTAssertNil(h.lastFailure(since: Date(timeIntervalSinceNow: 10)))
         // writing a new config clears the stale failure
         try h.writeConfig(.init(configJSON: "{}", insecureTLS: false, profileName: "y"))
         XCTAssertNil(h.lastFailure(since: before))
         h.clearConfig()
         XCTAssertThrowsError(try h.readConfig())
+    }
+
+    func testHandoffCarriesHelperConfig() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("wt-handoff-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let h = TunnelHandoff(directory: dir)
+        try h.writeConfig(.init(configJSON: "{}", helperJSON: "{\"awg\":1}", insecureTLS: false, profileName: "a"))
+        XCTAssertEqual(try h.readConfig().helperJSON, "{\"awg\":1}")
+        try h.writeConfig(.init(configJSON: "{}", insecureTLS: false, profileName: "b"))
+        XCTAssertNil(try h.readConfig().helperJSON)
+    }
+
+    func testProblemLanguage() {
+        let p = ImportOutcome.Problem(label: "l", message: "فارسی", messageEn: "english", code: "c")
+        XCTAssertEqual(p.text(persian: true), "فارسی")
+        XCTAssertEqual(p.text(persian: false), "english")
+        let q = ImportOutcome.Problem(label: "l", message: "فارسی")
+        XCTAssertEqual(q.text(persian: false), "فارسی")
     }
 
     func testGrouping() {

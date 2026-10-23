@@ -10,13 +10,16 @@ public struct TunnelHandoff {
     public struct Payload: Codable, Equatable {
         public var version: Int
         public var configJSON: String
+        /// Present only for AmneziaWG profiles: config of the helper that must start before sing-box.
+        public var helperJSON: String?
         public var insecureTLS: Bool
         public var profileName: String
         public var createdAt: Date
 
-        public init(configJSON: String, insecureTLS: Bool, profileName: String, createdAt: Date = Date()) {
+        public init(configJSON: String, helperJSON: String? = nil, insecureTLS: Bool, profileName: String, createdAt: Date = Date()) {
             self.version = 1
             self.configJSON = configJSON
+            self.helperJSON = helperJSON
             self.insecureTLS = insecureTLS
             self.profileName = profileName
             self.createdAt = createdAt

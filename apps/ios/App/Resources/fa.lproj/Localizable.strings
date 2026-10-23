@@ -93,3 +93,5 @@
 "advanced.about" = "دربارهٔ برنامه";
 "advanced.version" = "نسخه";
 "advanced.about.text" = "اطلاعات شما فقط روی همین دستگاه می‌ماند. برنامه هیچ داده‌ای دربارهٔ استفادهٔ شما جمع‌آوری نمی‌کند.";
+"failure.helper_start_failed.title" = "موتور AmneziaWG راه‌اندازی نشد";
+"failure.helper_start_failed.message" = "بخش کمکی اتصال AmneziaWG شروع نشد. کانفیگ را بررسی کنید و دوباره تلاش کنید؛ اگر ادامه داشت کانفیگ دیگری امتحان کنید.";

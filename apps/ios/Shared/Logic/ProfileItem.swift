@@ -29,7 +29,7 @@ public struct ProfileItem: Identifiable, Equatable, Hashable {
     /// True when this build of the app has an engine for the protocol (sing-box only for now).
     public var runsOnThisPlatform: Bool { ProfileItem.unsupportedProtocolIds.contains(protocolId) == false }
 
-    public static let unsupportedProtocolIds: Set<String> = ["amneziawg", "openvpn"]
+    public static let unsupportedProtocolIds: Set<String> = ["openvpn"]
 
     public var endpointText: String { host.isEmpty ? "" : "\(host):\(port)" }
 }

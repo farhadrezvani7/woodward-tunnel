@@ -6,6 +6,10 @@
 #   Generated/Libbox.xcframework                                       (sing-box libbox via gomobile)
 name: WoodwardTunnel
 
+include:
+  - path: project-awg.yml
+    enable: ${WT_AWG}
+
 options:
   bundleIdPrefix: app.woodward
   developmentLanguage: fa

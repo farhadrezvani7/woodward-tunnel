@@ -1,0 +1,9 @@
+# Included by project.yml only when WT_AWG=true (scripts/build-ios.sh sets it when the AmneziaWG
+# helper package was linked into Libbox.xcframework). It does not add a framework: the helper is
+# compiled into the same gomobile framework as sing-box, because two gomobile frameworks (two Go
+# runtimes) cannot live in one process.
+targets:
+  PacketTunnel:
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) WT_AWG"

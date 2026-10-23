@@ -4,10 +4,19 @@ import Foundation
 public struct ImportOutcome: Equatable {
     public struct Problem: Equatable {
         public let label: String
-        public let message: String
-        public init(label: String, message: String) {
+        public let message: String      // Persian
+        public let messageEn: String    // English
+        public let code: String
+        public init(label: String, message: String, messageEn: String = "", code: String = "") {
             self.label = label
             self.message = message
+            self.messageEn = messageEn
+            self.code = code
+        }
+
+        /// English text when asked for and available, otherwise Persian.
+        public func text(persian: Bool) -> String {
+            (!persian && !messageEn.isEmpty) ? messageEn : message
         }
     }
 

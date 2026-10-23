@@ -59,11 +59,21 @@ pub enum StartError {
     #[error("io: {0}")]
     Io(String),
     #[error("engine exited before it was ready")]
-    ExitedEarly,
+    ExitedEarly { tail: String },
     #[error("engine did not become ready in time")]
-    Timeout,
+    Timeout { tail: String },
     #[error("could not resolve the server address")]
     Resolve,
+}
+
+impl StartError {
+    /// Last (already redacted) output lines of the engine, for diagnostics. Never shown by default.
+    pub fn tail(&self) -> &str {
+        match self {
+            StartError::ExitedEarly { tail } | StartError::Timeout { tail } => tail,
+            _ => "",
+        }
+    }
 }
 
 impl From<std::io::Error> for StartError {
@@ -124,13 +134,21 @@ fn spawn(
 
 async fn wait_line(p: &mut Sidecar, needle: &str, limit: Duration) -> Result<String, StartError> {
     let end = tokio::time::Instant::now() + limit;
+    let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    let join =
+        |t: &std::collections::VecDeque<String>| t.iter().cloned().collect::<Vec<_>>().join("\n");
     loop {
         let left = end.saturating_duration_since(tokio::time::Instant::now());
         match tokio::time::timeout(left, p.lines.recv()).await {
             Ok(Some(l)) if l.contains(needle) => return Ok(l),
-            Ok(Some(_)) => {}
-            Ok(None) => return Err(StartError::ExitedEarly),
-            Err(_) => return Err(StartError::Timeout),
+            Ok(Some(l)) => {
+                tail.push_back(l);
+                if tail.len() > 20 {
+                    tail.pop_front();
+                }
+            }
+            Ok(None) => return Err(StartError::ExitedEarly { tail: join(&tail) }),
+            Err(_) => return Err(StartError::Timeout { tail: join(&tail) }),
         }
     }
 }
@@ -179,7 +197,9 @@ async fn start_singbox(
     let ready = match socks {
         Some(addr) => probe::wait_listening(addr, o.ready_timeout)
             .await
-            .map_err(|_| StartError::Timeout),
+            .map_err(|_| StartError::Timeout {
+                tail: String::new(),
+            }),
         None => wait_line(&mut sb, "sing-box started", o.ready_timeout)
             .await
             .map(|_| ()),

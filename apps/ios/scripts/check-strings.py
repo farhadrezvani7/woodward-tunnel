@@ -30,7 +30,7 @@ for k in sorted(used - set(fa)):
     errors.append("used but not defined: " + k)
 src = (root / "Shared/Logic/ConnectionState.swift").read_text(encoding="utf-8")
 codes = [c for c in re.findall(r'return "([a-z_]+)"', src) if not c.endswith("_")]
-codes += ["unsupported_amneziawg", "unsupported_openvpn"]
+codes += ["unsupported_amneziawg", "unsupported_openvpn", "helper_start_failed"]
 for c in set(codes):
     for suffix in ("title", "message"):
         key = f"failure.{c}.{suffix}"

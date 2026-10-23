@@ -53,8 +53,19 @@ apps/ios/
   calls `startVPNTunnel()`. The config is not put into `providerConfiguration` (the system keeps
   that in VPN preferences) and never in logs. The extension deletes the file right after
   reading it; the app deletes it again when the tunnel goes down.
-* `amneziaWg` / `openVpn` plans show a Persian explanation (`failure.unsupported_*`). Nothing
-  crashes and the extension is not started.
+* `openVpn` plans show an explanation (`failure.unsupported_openvpn`); nothing crashes and the
+  extension is not started.
+* `amneziaWg(helperJson, singboxConfigJson, socksPort, endpointIp)`: both JSON documents go into the
+  handoff file. The extension starts the Go helper first (`AwgmobileStart`, a userspace AmneziaWG peer
+  with SOCKS5 on loopback, package `engines/awg-socks/mobile`), then libbox with `singboxConfigJson`
+  (its only outbound points at the helper; the peer endpoint is already excluded from the TUN
+  routes by the core). The helper is linked into the **same** gomobile framework as libbox because two
+  gomobile frameworks cannot share a process; `build-ios.sh` binds both packages in one
+  `Libbox.xcframework` when `engines/awg-socks/mobile` exists and sets `WT_AWG=true` for XcodeGen
+  (`project-awg.yml` adds the compilation condition). Helper start failure maps to
+  `failure.helper_start_failed`.
+* Errors and import problems from the core carry Persian and English text (`reason`/`reasonEn`,
+  `message`/`messageEn`); the app shows the one matching its UI language.
 * If the extension fails it writes only a failure code (`last_failure.json`) that the app maps to
   a plain explanation. The text of sing-box errors is never forwarded because it can contain
   server names.
@@ -87,7 +98,7 @@ re-sync it (the compiler will tell you).
 ### Checking on Linux
 
 ```sh
-apps/ios/scripts/typecheck-linux.sh /path/to/swift          # builds and runs 14 logic tests,
+apps/ios/scripts/typecheck-linux.sh /path/to/swift          # builds and runs 16 logic tests,
                                                             # syntax-parses every Swift file
 WT_BINDINGS=<dir> apps/ios/scripts/typecheck-linux.sh ...   # also type-checks App/Core against
                                                             # freshly generated UniFFI bindings
@@ -101,7 +112,7 @@ On very new distributions the Swift 6.0.3 toolchain needs a `libxml2.so.2` symli
 
 Checked on Linux with Swift 6.0.3:
 
-* `Shared/Logic` and `Shared/Platform` (minus Security) compile, and 14 XCTest cases pass
+* `Shared/Logic` and `Shared/Platform` (minus Security) compile, and 16 XCTest cases pass
   (state machine, failure mapping, secret vault round trip, handoff files, grouping, import
   headline, DNS parsing, image sniffing, elapsed formatter).
 * `App/Core/CoreService.swift` and `AppSecretCallbacks.swift` type-check against bindings
@@ -111,6 +122,13 @@ Checked on Linux with Swift 6.0.3:
   `LibboxCommandServerHandler` in the Objective-C header that `gobind -lang=objc` generates from
   sing-box v1.14.3 (names compared with a script; signatures converted by hand following gomobile's
   Swift import rules and SagerNet's open-source sing-box-for-apple).
+* After the core FFI change: bindings regenerated from current `core-ffi` (`Failed(reason, reasonEn)`,
+  `FfiProblem.messageEn/code`, `amneziaWg` with four fields); `App/Core` type-checks against them and
+  16 logic tests pass (new: helper config in handoff, problem language selection).
+* `gobind -lang=objc` on sing-box v1.14.3 plus `engines/awg-socks/mobile` together (module resolved
+  with a `replace` directive, `go list` succeeded) produced `AwgmobileStart(NSString*, NSError**)`
+  and `AwgmobileStop(void)` next to the Libbox API, the names `AmneziaHelper.swift` uses. XcodeGen
+  generates the project with and without `WT_AWG`.
 * `fa`/`en` strings are consistent; the workflow is valid YAML.
 * `project.yml` was fed to XcodeGen 2.45.4 (built from source on Linux): it generated a project
   with both targets, the extension embedded in the app, both xcframeworks in the link phases,
@@ -123,6 +141,9 @@ Checked on Linux with Swift 6.0.3:
 * Everything that imports SwiftUI, UIKit, AVFoundation, PhotosUI, NetworkExtension, Network or
   Libbox: all of `App/Views`, `App/AppModel.swift`, `App/Tunnel`, `PacketTunnel/*`. Expect
   compile errors on the first Xcode build (type inference, availability, `Sendable` warnings).
+* The AmneziaWG path: `gomobile bind` with both packages in one framework, whether the umbrella
+  header exposes `Awgmobile*` through `import Libbox`, the `go.mod` edit in `build-ios.sh`, and
+  actual helper plus sing-box operation and memory use on a device.
 * The exact Swift signatures of the libbox protocol methods (derived by hand from the ObjC header).
 * `project.yml` semantics (XcodeGen): optional source path, xcframework dependencies, resource
   phase for `PrivacyInfo.xcprivacy`, extension embedding. Whether `Libbox.xcframework` contains a
@@ -147,7 +168,8 @@ Checked on Linux with Swift 6.0.3:
    memory; ~50 MB is commonly cited (UNVERIFIED, Apple does not publish it and it varies with iOS
    version/device). libbox sets `debug.SetMemoryLimit` to 80 % of 50 MiB and GC percent 50 when
    `oomKillerEnabled` is true on iOS (see `service/oomkiller` in sing-box; verify for your tag).
-   The extension turns that on. Protocols with large buffers (hysteria2/tuic over QUIC, many
+   The extension turns that on. **With AmneziaWG the userspace WireGuard peer (its netstack and
+   buffers) runs in the same Go heap as sing-box, so the budget is shared: the highest-risk setup.** Protocols with large buffers (hysteria2/tuic over QUIC, many
    concurrent connections, the gVisor stack) are the likeliest to hit it. Test on a real device
    with Instruments. If the extension is killed the app shows "connection ended unexpectedly".
 2. **App Store review.** VPN apps get extra scrutiny; see checklist. Circumvention-focused
@@ -193,8 +215,8 @@ Checked on Linux with Swift 6.0.3:
 
 ## Not done / limitations
 
-* AmneziaWG and OpenVPN profiles are listed with a "not supported on iOS" note and refuse to
-  connect (by design for this phase).
+* OpenVPN profiles are listed with a "not supported on iOS" note and refuse to connect (by design
+  for this phase). AmneziaWG is implemented but unverified (see above).
 * No `.onOpenURL` / document types registration (import from Files uses the in-app picker only).
 * No Xcode unit-test target; the logic tests run through `scripts/typecheck-linux.sh` (Swift
   Package built in a temporary directory) so they work on Linux CI.
