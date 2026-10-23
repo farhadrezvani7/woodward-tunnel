@@ -23,18 +23,20 @@ pub struct ApiError {
     pub code: &'static str,
     /// Short, credential-free detail; shown only under advanced settings.
     pub detail: String,
+    /// English version of `detail` when the core provides one (empty otherwise).
+    pub detail_en: String,
 }
 
 impl ApiError {
-    fn new(code: &'static str, detail: impl Into<String>) -> Self {
-        Self { code, detail: detail.into() }
+    pub(crate) fn new(code: &'static str, detail: impl Into<String>) -> Self {
+        Self { code, detail: detail.into(), detail_en: String::new() }
     }
 }
 
 impl From<AppError> for ApiError {
     fn from(e: AppError) -> Self {
         match e {
-            AppError::Fetch(f) => ApiError::new("fetch_failed", f.user_message()),
+            AppError::Fetch(f) => ApiError { code: "fetch_failed", detail: f.user_message(), detail_en: f.user_message_en() },
             AppError::Store(s) => ApiError::new("store", s.to_string()),
         }
     }
@@ -119,6 +121,8 @@ impl From<ProfileSummary> for ProfileDto {
 pub struct ProblemDto {
     pub label: String,
     pub message: String,
+    pub message_en: String,
+    pub code: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -134,7 +138,7 @@ impl From<ImportReport> for ImportDto {
         Self {
             added: r.added.into_iter().map(Into::into).collect(),
             duplicates: r.duplicates,
-            problems: r.problems.into_iter().map(|p| ProblemDto { label: p.label, message: p.message }).collect(),
+            problems: r.problems.into_iter().map(|p| ProblemDto { label: p.label, message: p.message, message_en: p.message_en, code: p.code }).collect(),
             subscription_urls: r.subscription_urls,
         }
     }
@@ -161,6 +165,9 @@ pub struct StatusDto {
     /// Unix milliseconds.
     pub connected_since: Option<u64>,
     pub message: Option<String>,
+    pub message_en: Option<String>,
+    /// network | server | config | permission
+    pub failure_code: Option<String>,
     pub attempt: u32,
     pub insecure_tls: bool,
 }
@@ -177,7 +184,7 @@ impl From<&Status> for StatusDto {
             UiState::Failed => "failed",
         };
         let since = s.connected_since.and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64);
-        Self { state, profile_id: s.profile_id.clone(), connected_since: since, message: s.message.clone(), attempt: s.attempt, insecure_tls: s.insecure_tls }
+        Self { state, profile_id: s.profile_id.clone(), connected_since: since, message: s.message.clone(), message_en: s.message_en.clone(), failure_code: s.failure_code.clone(), attempt: s.attempt, insecure_tls: s.insecure_tls }
     }
 }
 
@@ -301,7 +308,7 @@ impl Backend {
         for p in paths.iter().take(MAX_FILES_PER_IMPORT) {
             match read_capped(p) {
                 Ok(bytes) => total.merge(self.app.import_bytes(&bytes, "")?.into()),
-                Err(why) => total.problems.push(ProblemDto { label: file_label(p), message: why.into() }),
+                Err((fa, en)) => total.problems.push(ProblemDto { label: file_label(p), message: fa.into(), message_en: en.into(), code: "file".into() }),
             }
         }
         Ok(total)
@@ -477,19 +484,22 @@ fn file_label(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().chars().take(60).collect()).unwrap_or_default()
 }
 
-fn read_capped(p: &Path) -> Result<Vec<u8>, &'static str> {
+const READ_FAIL: (&str, &str) = ("فایل خوانده نشد.", "The file could not be read.");
+const TOO_BIG: (&str, &str) = ("فایل بزرگ‌تر از حد مجاز است.", "The file is larger than allowed.");
+
+fn read_capped(p: &Path) -> Result<Vec<u8>, (&'static str, &'static str)> {
     use std::io::Read;
-    let meta = std::fs::metadata(p).map_err(|_| "فایل خوانده نشد.")?;
+    let meta = std::fs::metadata(p).map_err(|_| READ_FAIL)?;
     if !meta.is_file() {
-        return Err("این مورد یک فایل نیست.");
+        return Err(("این مورد یک فایل نیست.", "This item is not a file."));
     }
     if meta.len() > MAX_FILE_BYTES {
-        return Err("فایل بزرگ‌تر از حد مجاز است.");
+        return Err(TOO_BIG);
     }
     let mut buf = Vec::new();
-    std::fs::File::open(p).and_then(|f| f.take(MAX_FILE_BYTES + 1).read_to_end(&mut buf)).map_err(|_| "فایل خوانده نشد.")?;
+    std::fs::File::open(p).and_then(|f| f.take(MAX_FILE_BYTES + 1).read_to_end(&mut buf)).map_err(|_| READ_FAIL)?;
     if buf.len() as u64 > MAX_FILE_BYTES {
-        return Err("فایل بزرگ‌تر از حد مجاز است.");
+        return Err(TOO_BIG);
     }
     Ok(buf)
 }

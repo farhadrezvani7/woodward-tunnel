@@ -117,6 +117,7 @@ case "$cmd" in
     ;;
   test)
     TARGET=x86_64-unknown-linux-gnu fetch_engines x86_64-unknown-linux-gnu
+    "$root/scripts/build-engines.sh"   # awg-testserver for the AmneziaWG test
     docker_run --cap-add NET_ADMIN --device /dev/net/tun "$image" bash docker/inside-test.sh
     ;;
   shell) docker_run -it "$image" bash ;;

@@ -66,6 +66,12 @@ Run for real, Linux x86_64, inside Docker (Ubuntu 24.04, WebKitGTK 4.1):
   non-root user with the file capabilities set; without capabilities `connect` is refused with
   `needs_privilege`. The probe goes to 1.1.1.1:443, so this proves the engine created the TUN device and
   started, not that probe bytes were observed on the TUN interface.
+- AmneziaWG through the Backend: `engines/bin/awg-testserver obfuscated` conf imported, connected in proxy
+  mode with the bundled `wt-awg-socks` build, `hello-through-awg` fetched from 10.0.0.1:8080 through the SOCKS port.
+- QR import: a generated QR PNG of an `ss://` link imported through `Backend::import_files` (the same entry
+  point the file picker and the drag-drop handler call); a blank image adds nothing.
+- Server given by hostname (docker network alias, real DNS) in proxy mode and in TUN mode, plus TUN with an
+  IP server, after the core's bootstrap-resolver/DNS-hijack change.
 - GUI under Xvfb with a real keyring (gnome-keyring): screenshots of empty state, paste dialog,
   subscription confirmation, list, connecting, connected with timer, advanced settings, English UI,
   reconnecting with a plain-language reason (Persian shaping and RTL layout were checked in them).
@@ -75,14 +81,14 @@ Run for real, Linux x86_64, inside Docker (Ubuntu 24.04, WebKitGTK 4.1):
 
 Only written, never run: Windows build/manifest/NSIS/MSI, macOS build/dmg and the real `osascript`
 prompt, Keychain and Credential Manager use, the GitHub workflow, the `pkexec setcap` fallback dialog
-(only the capability check and the refusal path ran), drag-and-drop of files (the Rust handler reads
-only dropped regular files; xdotool cannot synthesize a drag from a file manager), QR image import
-through the GUI (covered by core tests), AmneziaWG/OpenVPN through the desktop app.
+(only the capability check and the refusal path ran), the window-level drag-and-drop event itself (its handler only forwards paths to the tested
+`import_files`; xdotool cannot synthesize a file drag), QR import and AmneziaWG through the GUI (tested through
+the Backend only), OpenVPN through the desktop app.
 
 ## Known limits
 
-- Plain-language failure texts come from the core in Persian; the English UI maps the four known
-  texts and shows import problem messages in Persian.
+- Failure and import-problem texts come from the core in both languages (`message`, `message_en`); the UI
+  picks one by language.
 - Tray icons depend on the desktop environment (AppIndicator on Linux); closing the window quits the app
   and disconnects first.
 - Tauri and plugin versions are pinned (`tauri =2.12.1`, `tauri-build =2.7.1`, dialog `=2.8.1`, CLI

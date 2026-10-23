@@ -187,3 +187,153 @@ async fn tun_mode_connects_when_privileged() {
     b.disconnect();
     wait_state(&env, "idle", 15).await;
 }
+
+// ---- AmneziaWG through the Backend ------------------------------------------------------------
+
+struct KillOnDrop(std::process::Child);
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn plain_backend(tag: &str, bins: Binaries, settings: Settings, probe: Option<SocketAddr>) -> (Arc<Backend>, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("wt-desktop-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut cfg = BackendConfig::new(dir.join("app"), bins, "memory");
+    if let Some(p) = probe {
+        cfg.probe = p;
+    }
+    cfg.ready_timeout = Duration::from_secs(15);
+    cfg.initial = Some(settings);
+    let b = Backend::new(cfg, Arc::new(MemorySecretStore::default()), Arc::new(HttpFetcher), Arc::new(|_| {})).unwrap();
+    (b, dir)
+}
+
+async fn wait_backend(b: &Backend, want: &str, secs: u64) {
+    let end = tokio::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        let s = b.status();
+        if s.state == want {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < end, "timed out waiting for {want}, now {s:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Needs WT_AWG_SOCKS (the bundled helper, same file as the `wt-awg-socks` sidecar) and
+/// WT_AWG_TESTSERVER (engines/bin/awg-testserver).
+#[tokio::test(flavor = "multi_thread")]
+async fn amneziawg_conf_through_backend() {
+    use std::io::{BufRead, BufReader};
+    let (Some(awg), Some(srv)) = (std::env::var_os("WT_AWG_SOCKS"), std::env::var_os("WT_AWG_TESTSERVER")) else {
+        eprintln!("WT_AWG_SOCKS / WT_AWG_TESTSERVER not set; skipping");
+        return;
+    };
+    if !have_engine() {
+        return;
+    }
+    let mut child = std::process::Command::new(srv).arg("obfuscated").stdout(std::process::Stdio::piped()).spawn().unwrap();
+    let out = child.stdout.take().unwrap();
+    let _guard = KillOnDrop(child);
+    let line = BufReader::new(out).lines().next().unwrap().unwrap();
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let conf = v["conf"].as_str().unwrap().to_string();
+
+    let socks = free_port();
+    let s = Settings { mode: "proxy".into(), socks_port: socks, ..Settings::default() };
+    // The probe is the in-tunnel server itself: Connected can only be reached if bytes crossed the tunnel.
+    let (b, dir) = plain_backend(
+        "awg",
+        Binaries { sing_box: sing_box(), awg_socks: awg.into(), openvpn: "openvpn".into() },
+        s,
+        Some(SocketAddr::from(([10, 0, 0, 1], 8080))),
+    );
+    let r = b.import_text(&conf).unwrap();
+    assert_eq!(r.added.len(), 1, "{:?}", r.problems.iter().map(|p| &p.code).collect::<Vec<_>>());
+    assert_eq!(r.added[0].protocol, "AmneziaWG");
+    let json = serde_json::to_string(&b.list_profiles().unwrap()).unwrap();
+    assert!(!json.contains("PrivateKey") && !json.contains("private_key"));
+    b.connect(&r.added[0].id).unwrap();
+    wait_backend(&b, "connected", 30).await;
+    let body = probe::http_get_via_socks(SocketAddr::from(([127, 0, 0, 1], socks)), "10.0.0.1", 8080, Duration::from_secs(5)).await.unwrap();
+    assert!(body.contains("hello-through-awg"), "{body}");
+    b.disconnect();
+    wait_backend(&b, "idle", 10).await;
+    std::fs::remove_dir_all(dir).ok();
+}
+
+// ---- QR import --------------------------------------------------------------------------------
+
+fn qr_png(text: &str) -> Vec<u8> {
+    let code = qrcode::QrCode::new(text.as_bytes()).unwrap();
+    let w = code.width();
+    let (scale, quiet) = (8usize, 4usize);
+    let side = (w + 2 * quiet) * scale;
+    let colors = code.to_colors();
+    let mut img = image::GrayImage::from_pixel(side as u32, side as u32, image::Luma([255]));
+    for y in 0..w {
+        for x in 0..w {
+            if colors[y * w + x] == qrcode::Color::Dark {
+                for dy in 0..scale {
+                    for dx in 0..scale {
+                        img.put_pixel(((x + quiet) * scale + dx) as u32, ((y + quiet) * scale + dy) as u32, image::Luma([0]));
+                    }
+                }
+            }
+        }
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn qr_image_file_imports_through_backend() {
+    let png = qr_png("ss://aes-256-gcm:pw-qr-1234567@qr.example.com:8388#QR-Server");
+    let dir = std::env::temp_dir().join(format!("wt-desktop-qr-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("shot.png");
+    std::fs::write(&f, &png).unwrap();
+    let (b, d2) = plain_backend("qrapp", Binaries { sing_box: "sing-box".into(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into() }, Settings::default(), None);
+    // The same entry point the file picker and the drag-drop handler use.
+    let r = b.import_files(&[f]).unwrap();
+    assert_eq!(r.added.len(), 1, "{:?}", r.problems);
+    assert_eq!(r.added[0].name, "QR-Server");
+    assert_eq!(r.added[0].protocol, "Shadowsocks");
+    // Not a QR: reported with both languages, nothing added.
+    let blank = dir.join("blank.png");
+    let img = image::GrayImage::from_pixel(64, 64, image::Luma([255]));
+    img.save(&blank).unwrap();
+    let r = b.import_files(&[blank]).unwrap();
+    assert!(r.added.is_empty());
+    assert!(!r.problems.is_empty() || r.duplicates == 0);
+    std::fs::remove_dir_all(dir).ok();
+    std::fs::remove_dir_all(d2).ok();
+}
+
+// ---- server given by hostname -------------------------------------------------------------------
+
+/// WT_REMOTE_SS="host:port": a shadowsocks server (password pw-desktop-1234, aes-256-gcm) reachable only
+/// by name, e.g. a docker network alias. WT_REMOTE_MODE=tun runs it as a system tunnel.
+#[tokio::test(flavor = "multi_thread")]
+async fn server_by_hostname() {
+    let Ok(remote) = std::env::var("WT_REMOTE_SS") else {
+        eprintln!("WT_REMOTE_SS not set; skipping");
+        return;
+    };
+    let tun = std::env::var("WT_REMOTE_MODE").as_deref() == Ok("tun");
+    let socks = free_port();
+    let s = Settings { mode: if tun { "tun" } else { "proxy" }.into(), socks_port: socks, ..Settings::default() };
+    let (b, dir) = plain_backend("host", Binaries { sing_box: sing_box(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into() }, s, Some(SocketAddr::from(([1, 1, 1, 1], 443))));
+    let id = b.import_text(&format!("ss://aes-256-gcm:pw-desktop-1234@{remote}#by-name")).unwrap().added[0].id.clone();
+    assert!(b.list_profiles().unwrap()[0].host.chars().any(|c| c.is_alphabetic()));
+    b.connect(&id).unwrap();
+    wait_backend(&b, "connected", 40).await;
+    eprintln!("hostname server connected (tun={tun})");
+    b.disconnect();
+    wait_backend(&b, "idle", 15).await;
+    std::fs::remove_dir_all(dir).ok();
+}

@@ -20,7 +20,7 @@ type B<'a> = State<'a, Arc<Backend>>;
 
 async fn blocking<T: Send + 'static>(b: &B<'_>, f: impl FnOnce(&Backend) -> Result<T, ApiError> + Send + 'static) -> Result<T, ApiError> {
     let b = b.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || f(&b)).await.map_err(|_| ApiError { code: "internal", detail: "task".into() })?
+    tauri::async_runtime::spawn_blocking(move || f(&b)).await.map_err(|_| ApiError::new("internal", "task"))?
 }
 
 #[tauri::command]

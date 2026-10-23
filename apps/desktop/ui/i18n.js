@@ -75,10 +75,6 @@ export const dict = {
     e_grant_failed: "اجازه داده نشد.",
     e_internal: "خطای داخلی برنامه.",
     e_unknown: "مشکلی پیش آمد.",
-    m_network: "اینترنت شما قطع است یا ناپایدار است. اتصال شبکه را بررسی کنید.",
-    m_server: "سرور پاسخ نمی‌دهد. دوباره تلاش کنید یا سرور دیگری انتخاب کنید.",
-    m_config: "این کانفیگ کار نمی‌کند. از ارائه‌دهندهٔ سرویس فایل جدید بخواهید.",
-    m_permission: "اجازهٔ ساخت VPN داده نشد. در پنجرهٔ سیستم، اجازه را تأیید کنید.",
     langBtn: "English",
   },
   en: {
@@ -153,27 +149,9 @@ export const dict = {
     e_grant_failed: "Permission was not granted.",
     e_internal: "Internal app error.",
     e_unknown: "Something went wrong.",
-    m_network: "Your internet is down or unstable. Check your network connection.",
-    m_server: "The server is not responding. Try again or pick another server.",
-    m_config: "This config does not work. Ask your service provider for a new file.",
-    m_permission: "VPN permission was not granted. Approve it in the system prompt.",
     langBtn: "فارسی",
   },
 };
-
-// Plain-language failure texts come from the core in Persian. For the English UI they are
-// mapped here by their leading words; unknown texts are shown unchanged.
-const coreMessages = [
-  ["اینترنت شما قطع", "m_network"],
-  ["سرور پاسخ نمی‌دهد", "m_server"],
-  ["این کانفیگ کار نمی‌کند", "m_config"],
-  ["اجازهٔ ساخت VPN", "m_permission"],
-];
-export function coreMessage(lang, text, t) {
-  if (lang === "fa" || !text) return text;
-  const hit = coreMessages.find(([p]) => text.startsWith(p));
-  return hit ? t(hit[1]) : text;
-}
 
 export function makeT(lang) {
   const table = dict[lang] || dict.fa;

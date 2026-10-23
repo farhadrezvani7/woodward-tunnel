@@ -1,4 +1,4 @@
-import { makeT, coreMessage } from "./i18n.js";
+import { makeT } from "./i18n.js";
 
 const tauri = window.__TAURI__;
 const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
@@ -26,6 +26,8 @@ const state = {
 };
 let t = makeT("fa");
 
+// Core texts come in both languages: `message` (Persian) and `message_en`.
+function pick(o, k) { return (state.lang === "fa" ? o[k] : o[k + "_en"]) || o[k] || ""; }
 function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
 function fmtNum(n) { return new Intl.NumberFormat(state.lang === "fa" ? "fa-IR" : "en-US").format(n); }
 
@@ -79,7 +81,7 @@ function renderStatus() {
 
   const detail = $("state-detail");
   let d = "";
-  if (st === "failed" || st === "reconnecting") d = coreMessage(state.lang, s.message, t) || "";
+  if (st === "failed" || st === "reconnecting") d = pick(s, "message") || "";
   else if (st === "connected") d = selectedName() || "";
   else if (st === "connecting" && s.attempt > 1) d = fmtNum(s.attempt);
   else if (st === "idle" && state.profiles.length === 0) d = t("noProfile");
@@ -182,7 +184,7 @@ async function handleImport(dto) {
   if (dto.added.length) parts.push(t("imp_added", { n: fmtNum(dto.added.length) }));
   if (dto.duplicates) parts.push(t("imp_dup", { n: fmtNum(dto.duplicates) }));
   if (dto.problems.length) {
-    const msgs = [...new Set(dto.problems.map((p) => p.message))].slice(0, 2).join(" ");
+    const msgs = [...new Set(dto.problems.map((p) => pick(p, "message")))].slice(0, 2).join(" ");
     parts.push(t("imp_problem", { n: fmtNum(dto.problems.length), msg: msgs }));
   }
   if (!parts.length && !dto.subscription_urls.length) parts.push(t("imp_none"));
@@ -208,7 +210,7 @@ $("sub-ok").addEventListener("click", async () => {
     const dto = await invoke("import_subscription", { url });
     toast(t("imp_sub", { n: fmtNum(dto.added.length) }));
     await refreshProfiles();
-  } catch (e) { toast(e && e.detail ? e.detail : errText(e), true); }
+  } catch (e) { toast(e && e.detail ? pick(e, "detail") : errText(e), true); }
   askNextSubscription();
 });
 $("dlg-sub").addEventListener("close", () => setTimeout(askNextSubscription, 0));

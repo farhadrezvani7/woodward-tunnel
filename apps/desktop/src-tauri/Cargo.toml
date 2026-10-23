@@ -36,6 +36,8 @@ core-store = { path = "../../../crates/core-store" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 core-engine = { path = "../../../crates/core-engine" }
 core-log = { path = "../../../crates/core-log" }
+qrcode = { version = "0.14", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]
 opt-level = "s"
