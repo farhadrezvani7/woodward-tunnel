@@ -3,6 +3,8 @@ package app.woodwardtunnel.bindings
 import android.content.Context
 import app.woodwardtunnel.secrets.KeystoreSecretStore
 import uniffi.wtcore.FfiException
+import uniffi.wtcore.FfiProblem
+import java.util.Locale
 import uniffi.wtcore.WtApp
 import java.io.File
 
@@ -28,5 +30,11 @@ object Core {
     class CoreUnavailable : Exception("core not available")
 }
 
-/** The user-facing (already plain language) message carried by a core error, if any. */
-fun Throwable.coreMessage(): String? = (this as? FfiException.Failed)?.reason
+private fun english(): Boolean = Locale.getDefault().language == "en"
+
+/** The user-facing (already plain language) message carried by a core error, in the app language. */
+fun Throwable.coreMessage(): String? =
+    (this as? FfiException.Failed)?.let { if (english()) it.reasonEn else it.reason }
+
+/** Import problem text in the app language. */
+fun FfiProblem.text(): String = if (english()) messageEn else message

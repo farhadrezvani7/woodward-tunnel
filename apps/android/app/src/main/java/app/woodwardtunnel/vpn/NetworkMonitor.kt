@@ -68,6 +68,9 @@ class NetworkMonitor(context: Context) {
         thread.quitSafely()
     }
 
+    /** The current real (non-VPN) default network, if any. */
+    fun defaultNetwork(): Network? = current
+
     fun setListener(l: InterfaceUpdateListener?) {
         listener = l
         if (l != null) handler.post { report(current) }

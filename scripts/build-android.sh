@@ -59,14 +59,21 @@ build_libbox() {
     echo "sing-box checkout is $head, expected $SINGBOX_COMMIT for $SINGBOX_TAG" >&2
     exit 1
   fi
-  local stamp="$SINGBOX_COMMIT|$GOMOBILE_VERSION|$LIBBOX_TAGS|$ANDROID_API|$NDK_VERSION"
+  # The AmneziaWG user-space peer (engines/awg-socks/mobile) goes into the same gomobile library as
+  # sing-box: two separate gomobile AARs would both ship go.Seq and clash. A go.work file ties the
+  # pinned sing-box checkout and the repo's awg-socks module together for that one bind.
+  local awg_dir="$root/engines/awg-socks"
+  local awg_hash
+  awg_hash="$(cd "$awg_dir" && find . -name '*.go' -o -name go.mod -o -name go.sum | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
+  printf 'go 1.25.5\n\nuse ./sing-box\nuse %s\n' "$awg_dir" > "$cache/go.work"
+  local stamp="$SINGBOX_COMMIT|$GOMOBILE_VERSION|$LIBBOX_TAGS|$ANDROID_API|$NDK_VERSION|$awg_hash"
   if [ -f "$android/app/libs/libbox.aar" ] && [ "$(cat "$cache/libbox.stamp" 2>/dev/null || true)" = "$stamp" ]; then
     echo "libbox.aar up to date"
     return
   fi
   (
     cd "$src"
-    export GOBIN="$cache/gobin" PATH="$cache/gobin:$PATH"
+    export GOBIN="$cache/gobin" PATH="$cache/gobin:$PATH" GOWORK="$cache/go.work"
     go install github.com/sagernet/gomobile/cmd/gomobile@"$GOMOBILE_VERSION" \
                github.com/sagernet/gomobile/cmd/gobind@"$GOMOBILE_VERSION"
     mkdir -p "$android/app/libs"
@@ -74,7 +81,8 @@ build_libbox() {
     gomobile bind -v -o "$android/app/libs/libbox.aar" -target android -androidapi "$ANDROID_API" \
       -javapkg=io.nekohasekai -libname=box -trimpath -buildvcs=false \
       -ldflags "-X github.com/sagernet/sing-box/constant.Version=${SINGBOX_TAG#v} -X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0 -s -w -buildid=" \
-      -tags "$LIBBOX_TAGS" ./experimental/libbox
+      -tags "$LIBBOX_TAGS" ./experimental/libbox \
+      github.com/farhadrezvani7/woodward-tunnel/engines/awg-socks/mobile
   )
   echo "$stamp" > "$cache/libbox.stamp"
 }
@@ -95,23 +103,6 @@ build_rust() {
   rm -rf "$gen"; mkdir -p "$gen"
   (cd "$root" && cargo run --locked -q -p core-ffi --bin uniffi-bindgen -- generate \
       --library "$jni/arm64-v8a/libwtcore.so" --language kotlin --out-dir "$gen" --no-format)
-  fix_bindings "$gen/uniffi/wtcore/wtcore.kt"
-}
-
-# UniFFI 0.29 emits `val message` plus `override val message` for an error field called `message`,
-# which Kotlin rejects. Rename the field in the generated file; asserts that the edit applied.
-fix_bindings() {
-  python3 - "$1" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p, encoding="utf-8").read()
-if "override val message\n            get() = \"message=${ `message` }\"" in s:
-    old = "val `message`: kotlin.String\n        ) : FfiException() {\n        override val message\n            get() = \"message=${ `message` }\""
-    assert s.count(old) == 1, "FfiException.Failed pattern not found exactly once"
-    s = s.replace(old, "val `reason`: kotlin.String\n        ) : FfiException() {\n        override val message: String\n            get() = `reason`")
-    open(p, "w", encoding="utf-8").write(s)
-    print("patched FfiException.Failed")
-PY
 }
 
 # ---- local release keystore ----------------------------------------------------------------

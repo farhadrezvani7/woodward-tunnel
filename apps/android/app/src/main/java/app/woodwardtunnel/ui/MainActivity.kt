@@ -247,8 +247,8 @@ class MainActivity : ComponentActivity() {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (s.added > 0) Text(stringResource(R.string.import_added, s.added))
                         if (s.duplicates > 0) Text(stringResource(R.string.import_duplicates, s.duplicates))
-                        s.problems.take(5).forEach { (label, msg) ->
-                            Text(if (label.isBlank()) msg else "$label: $msg", style = MaterialTheme.typography.bodySmall)
+                        s.problems.take(5).forEach { msg ->
+                            Text(msg, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 },

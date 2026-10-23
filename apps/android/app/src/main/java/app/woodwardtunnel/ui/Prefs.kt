@@ -8,12 +8,17 @@ object Prefs {
     private const val FILE = "wt_prefs"
     private const val K_SELECTED = "selected_profile"
     private const val K_DNS = "dns_servers"
+    private const val K_VERIFY = "verify_internet"
     val DEFAULT_DNS = listOf("1.1.1.1", "8.8.8.8")
 
     private fun sp(c: Context) = c.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun selectedId(c: Context): String? = sp(c).getString(K_SELECTED, null)
     fun setSelectedId(c: Context, id: String?) = sp(c).edit().putString(K_SELECTED, id).apply()
+
+    /** Whether "connected" requires a successful internet check through the tunnel (default on). */
+    fun verifyInternet(c: Context): Boolean = sp(c).getBoolean(K_VERIFY, true)
+    fun setVerifyInternet(c: Context, on: Boolean) = sp(c).edit().putBoolean(K_VERIFY, on).apply()
 
     fun dnsServers(c: Context): List<String> =
         sp(c).getString(K_DNS, null)?.let(::parseDns)?.takeIf { it.isNotEmpty() } ?: DEFAULT_DNS

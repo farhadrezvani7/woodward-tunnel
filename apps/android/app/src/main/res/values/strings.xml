@@ -84,5 +84,7 @@
     <string name="settings_details_none">خطایی ثبت نشده است.</string>
     <string name="settings_about_title">دربارهٔ برنامه</string>
     <string name="settings_about_body">نسخهٔ برنامه %1$s · موتور %2$s</string>
+    <string name="settings_verify_title">بررسی اینترنت پس از اتصال</string>
+    <string name="settings_verify_body">اگر خاموش باشد، به‌محض راه‌افتادن تونل «متصل» نشان داده می‌شود. برای کانفیگ‌هایی که فقط یک شبکهٔ خصوصی را مسیریابی می‌کنند خاموش کنید.</string>
     <string name="settings_saved">ذخیره شد.</string>
 </resources>

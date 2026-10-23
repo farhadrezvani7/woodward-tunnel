@@ -16,9 +16,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import app.woodwardtunnel.BuildConfig
 import app.woodwardtunnel.R
@@ -67,6 +70,7 @@ fun SettingsScreen(
             onValueChange = { dns = it; dnsError = false },
             isError = dnsError,
             singleLine = true,
+            textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
             supportingText = {
                 Text(stringResource(if (dnsError) R.string.settings_dns_invalid else R.string.settings_dns_hint))
             },
@@ -82,12 +86,23 @@ fun SettingsScreen(
         }) { Text(stringResource(R.string.action_save)) }
 
         HorizontalDivider()
+        var verify by remember { mutableStateOf(Prefs.verifyInternet(ctx)) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.settings_verify_title), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_verify_body), style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = verify, onCheckedChange = { verify = it; Prefs.setVerifyInternet(ctx, it) })
+        }
+
+        HorizontalDivider()
         Text(stringResource(R.string.settings_subscription_title), style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
             value = sub,
             onValueChange = { sub = it; subError = false },
             isError = subError,
             singleLine = true,
+            textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr),
             label = { Text(stringResource(R.string.settings_subscription_hint)) },
             supportingText = { if (subError) Text(stringResource(R.string.settings_subscription_invalid)) },
             modifier = Modifier.fillMaxWidth(),

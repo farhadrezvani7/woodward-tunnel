@@ -21,6 +21,7 @@ import (
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
+	"github.com/farhadrezvani7/woodward-tunnel/engines/awg-socks/internal/awgsocks"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -82,10 +83,10 @@ func TestAmneziaWgCarriesTraffic(t *testing.T) {
 
 	// Client: the real binary, configured from JSON.
 	dir := t.TempDir()
-	cfg := Config{
+	cfg := awgsocks.Config{
 		PrivateKey: base64.StdEncoding.EncodeToString(cPriv[:]),
 		Addresses:  []string{"10.0.0.2/32"},
-		Peer: Peer{PublicKey: base64.StdEncoding.EncodeToString(sPub[:]), Endpoint: fmt.Sprintf("127.0.0.1:%d", port),
+		Peer: awgsocks.Peer{PublicKey: base64.StdEncoding.EncodeToString(sPub[:]), Endpoint: fmt.Sprintf("127.0.0.1:%d", port),
 			AllowedIPs: []string{"10.0.0.0/24"}, Keepalive: 1},
 		Awg: obf,
 	}

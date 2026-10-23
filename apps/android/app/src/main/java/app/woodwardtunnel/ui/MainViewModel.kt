@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import app.woodwardtunnel.R
 import app.woodwardtunnel.bindings.Core
 import app.woodwardtunnel.bindings.coreMessage
+import app.woodwardtunnel.bindings.text
 import app.woodwardtunnel.vpn.ConnState
 import app.woodwardtunnel.vpn.TunnelController
 import app.woodwardtunnel.vpn.TunnelState
@@ -29,7 +30,7 @@ import uniffi.wtcore.FfiProfile
 
 class UiText(@StringRes val res: Int, val args: List<Any> = emptyList())
 
-class ImportSummary(val added: Int, val duplicates: Int, val problems: List<Pair<String, String>>)
+class ImportSummary(val added: Int, val duplicates: Int, val problems: List<String>)
 
 /** Something received from another app that the user has not yet agreed to import. */
 sealed interface ExternalImport {
@@ -154,7 +155,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val dup = r.duplicates.toInt()
                 when {
                     r.problems.isNotEmpty() ->
-                        _summary.value = ImportSummary(added, dup, r.problems.map { it.label to it.message })
+                        _summary.value = ImportSummary(added, dup, r.problems.map { p -> p.text().let { t -> if (p.label.isBlank()) t else "${p.label}: $t" } })
                     added > 0 -> say(R.string.import_added, added)
                     dup > 0 -> say(R.string.import_duplicates, dup)
                     r.subscriptionUrls.isEmpty() -> say(R.string.import_nothing)
@@ -210,7 +211,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 TunnelState.set(ConnState.Error(R.string.err_core, e.coreMessage()))
                 return@launch
             }
-            if (plan !is FfiLaunchPlan.SingBox) {
+            if (plan is FfiLaunchPlan.OpenVpn) {
                 TunnelState.set(ConnState.Error(R.string.err_unsupported_protocol))
                 return@launch
             }

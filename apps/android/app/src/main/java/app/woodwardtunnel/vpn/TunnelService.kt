@@ -22,6 +22,7 @@ import app.woodwardtunnel.bindings.Core
 import app.woodwardtunnel.bindings.coreMessage
 import app.woodwardtunnel.ui.MainActivity
 import app.woodwardtunnel.ui.Prefs
+import io.nekohasekai.awgmobile.Awgmobile
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
 import io.nekohasekai.libbox.ConnectionOwner
@@ -80,6 +81,7 @@ class TunnelService : VpnService(), PlatformInterface {
     private var commandServer: CommandServer? = null
     private var tun: ParcelFileDescriptor? = null
     private var monitor: NetworkMonitor? = null
+    private var awgRunning = false
 
     override fun onCreate() {
         super.onCreate()
@@ -139,12 +141,20 @@ class TunnelService : VpnService(), PlatformInterface {
         }
         val config: String
         val insecure: Boolean
+        var awgJson: String? = null
+        var awgPort = 0
         when (plan) {
             is FfiLaunchPlan.SingBox -> {
                 config = plan.configJson
                 insecure = plan.insecureTls
             }
-            is FfiLaunchPlan.AmneziaWg, is FfiLaunchPlan.OpenVpn -> {
+            is FfiLaunchPlan.AmneziaWg -> {
+                config = plan.singboxConfigJson
+                insecure = false
+                awgJson = plan.helperJson
+                awgPort = plan.socksPort.toInt()
+            }
+            is FfiLaunchPlan.OpenVpn -> {
                 fail(R.string.err_unsupported_protocol)
                 return
             }
@@ -152,6 +162,12 @@ class TunnelService : VpnService(), PlatformInterface {
         if (stopRequested) return
         try {
             EngineRuntime.ensureSetup(this)
+            if (awgJson != null) {
+                // User-space AmneziaWG peer, in this process; sing-box then uses it as its SOCKS5 upstream.
+                val addr = Awgmobile.start(awgJson)
+                awgRunning = true
+                if (addr.substringAfterLast(':').toIntOrNull() != awgPort) error("helper listens elsewhere")
+            }
             monitor = NetworkMonitor(this).also { it.start() }
             val server = CommandServer(handler, this)
             commandServer = server
@@ -165,9 +181,11 @@ class TunnelService : VpnService(), PlatformInterface {
         }
         if (stopRequested) return
 
-        // Connected only once traffic provably flows through the tunnel.
-        var ok = false
+        // Connected only once traffic provably flows through the tunnel (unless the user turned the check off,
+        // e.g. for a config that only routes a private network).
+        var ok = !Prefs.verifyInternet(this)
         for (attempt in 0 until 3) {
+            if (ok) break
             if (stopRequested) return
             if (Probe.reachable()) {
                 ok = true
@@ -194,6 +212,10 @@ class TunnelService : VpnService(), PlatformInterface {
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
+        if (awgRunning) {
+            runCatching { Awgmobile.stop() }
+            awgRunning = false
+        }
         runCatching { tun?.close() }
         tun = null
         monitor?.stop()
@@ -362,7 +384,7 @@ class TunnelService : VpnService(), PlatformInterface {
     override fun includeAllNetworks(): Boolean = false
     override fun clearDNSCache() {}
     override fun readWIFIState(): WIFIState? = null
-    override fun localDNSTransport(): LocalDNSTransport? = null
+    override fun localDNSTransport(): LocalDNSTransport? = LocalResolver { monitor?.defaultNetwork() }
     override fun sendNotification(notification: LibboxNotification?) {}
     override fun cancelNotification(identifier: String?, typeID: Int) {}
     override fun startNeighborMonitor(listener: NeighborUpdateListener?) {}
