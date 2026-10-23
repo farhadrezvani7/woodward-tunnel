@@ -17,8 +17,26 @@ cp -r /src /work && cd /work && rm -rf target apps
 CRATES="-p core-model -p core-import -p core-store -p core-engine -p core-session -p core-log -p core-policy -p core-app -p core-keyring -p wt-cli"
 echo "== windows-gnu"
 CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc cargo check $CRATES --target x86_64-pc-windows-gnu 2>&1 | tail -${CHECK_TAIL:-3}
-printf "#!/bin/sh\nexec python3 -m ziglang cc -target aarch64-macos \"\$@\"\n" > /usr/local/bin/zcc-arm64; chmod +x /usr/local/bin/zcc-arm64
-printf "#!/bin/sh\nexec python3 -m ziglang cc -target x86_64-macos \"\$@\"\n" > /usr/local/bin/zcc-x64; chmod +x /usr/local/bin/zcc-x64
+cat > /usr/local/bin/zcc <<PY
+#!/usr/bin/env python3
+# zig cc does not understand the --target=arm64-apple-macosx flag the cc crate adds; replace it.
+import os, sys
+target = sys.argv[1]
+args, skip = [], False
+for a in sys.argv[2:]:
+    if skip:
+        skip = False
+    elif a.startswith("--target=") or a.startswith("-mmacosx-version-min="):
+        pass
+    elif a == "-arch":
+        skip = True
+    else:
+        args.append(a)
+os.execvp("python3", ["python3", "-m", "ziglang", "cc", "-target", target] + args)
+PY
+chmod +x /usr/local/bin/zcc
+printf "#!/bin/sh\nexec zcc aarch64-macos \"\$@\"\n" > /usr/local/bin/zcc-arm64; chmod +x /usr/local/bin/zcc-arm64
+printf "#!/bin/sh\nexec zcc x86_64-macos \"\$@\"\n" > /usr/local/bin/zcc-x64; chmod +x /usr/local/bin/zcc-x64
 echo "== macos arm64"
 CC_aarch64_apple_darwin=zcc-arm64 cargo check $CRATES --target aarch64-apple-darwin 2>&1 | tail -${CHECK_TAIL:-3}
 echo "== macos x86_64"

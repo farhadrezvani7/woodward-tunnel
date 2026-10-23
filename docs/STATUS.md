@@ -19,7 +19,7 @@ API 36.1 x86_64). "Written" means source exists but was never executed. Nothing 
 |---|---|---|---|---|
 | Linux | run | run (.deb, AppImage, binary in Docker) | run (Xvfb screenshots, real keyring) | run: Docker TUN with kill switch and recovery; non-root with file capabilities |
 | Windows | run: `cargo check` for windows-gnu, all core crates and CLI | written | not run | not run |
-| macOS | see scripts/check-cross.sh | written | not run | not run |
+| macOS | run: `cargo check` for aarch64 and x86_64 (zig as C compiler), all core crates and CLI | written | not run | not run |
 | Android | run (4 ABIs) | run (debug and release APK) | run (emulator x86_64) | run (emulator, see table above) |
 | iOS, iPadOS | not run | not run (no Xcode here) | not run | not run |
 
