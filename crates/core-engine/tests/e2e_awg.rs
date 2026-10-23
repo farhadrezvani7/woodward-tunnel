@@ -26,7 +26,7 @@ fn free_port() -> u16 {
         .port()
 }
 
-async fn run(kind: &str) {
+async fn run(kind: &str, expected: core_model::Protocol) {
     let (Ok(awg), Ok(srv)) = (
         std::env::var("WT_AWG_SOCKS"),
         std::env::var("WT_AWG_TESTSERVER"),
@@ -53,7 +53,7 @@ async fn run(kind: &str) {
         .first()
         .unwrap_or_else(|| panic!("{:?}", a.issues))
         .clone();
-    assert_eq!(profile.protocol, core_model::Protocol::AmneziaWg);
+    assert_eq!(profile.protocol, expected);
 
     let socks = free_port();
     let dir = std::env::temp_dir().join(format!("wt-awg-{kind}-{}", std::process::id()));
@@ -103,7 +103,7 @@ async fn run(kind: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn amneziawg_obfuscated_through_runner() {
-    run("obfuscated").await;
+    run("obfuscated", core_model::Protocol::AmneziaWg).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -114,4 +114,10 @@ async fn plain_wireguard_conf_over_awg_helper_is_not_used() {
         a.profiles[0].protocol.engine(),
         core_model::EngineKind::SingBox
     );
+}
+
+/// Standard WireGuard (no obfuscation) through sing-box's own WireGuard endpoint, no helper involved.
+#[tokio::test(flavor = "multi_thread")]
+async fn plain_wireguard_through_singbox_endpoint() {
+    run("plain", core_model::Protocol::WireGuard).await;
 }

@@ -6,10 +6,10 @@ API 36.1 x86_64). "Written" means source exists but was never executed. Nothing 
 ## Protocols
 | Protocol | Import | Config generated and accepted by the engine | Carried real traffic in a test |
 |---|---|---|---|
-| Shadowsocks, VLESS (tcp, ws+tls), VMess, Trojan+TLS, Hysteria2 | run | run (`sing-box check`) | run: loopback server per protocol; Linux TUN (Shadowsocks); Android emulator (Shadowsocks, Trojan, VLESS+WS, Hysteria2) |
-| WireGuard | run | run | not run (config accepted only) |
-| TUIC, Hysteria1, AnyTLS, SOCKS, HTTP, SSH | run | run | not run |
-| AmneziaWG (obfuscated) | run | run | run: user-space server -> helper -> sing-box, desktop-style runner; Android emulator; desktop backend test |
+| Shadowsocks, VLESS (tcp, ws+tls), VMess, Trojan+TLS, Hysteria1, Hysteria2, TUIC, AnyTLS, SOCKS5 (auth), HTTP proxy (auth) | run | run (`sing-box check`) | run: a loopback sing-box server per protocol; plus Linux TUN (Shadowsocks) and Android emulator (Shadowsocks, Trojan, VLESS+WS, Hysteria2) |
+| WireGuard | run | run | run: user-space WireGuard server -> sing-box WireGuard endpoint |
+| VLESS Reality, SSH | run | run | not run (Reality needs a real TLS front site; no ssh server in the test setup) |
+| AmneziaWG (obfuscated) | run | run | run: user-space server -> helper -> sing-box via the runner; Android emulator; desktop backend test |
 | OpenVPN | run (allowlist, hostile directives rejected) | run | run: real OpenVPN server and client in Docker, TUN, traffic through the VPN |
 | Amnezia `vpn://` links | run against a link built to the documented format | - | not tested against a real Amnezia export |
 | Clash, Xray, sing-box JSON, Outline JSON, base64 subscriptions, QR images | run | run | not run with a real provider's data |

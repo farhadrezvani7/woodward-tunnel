@@ -237,3 +237,38 @@ case!(hysteria2, |p, d| {
         format!("hysteria2://pw-hy2-1234@127.0.0.1:{p}?sni=example.com&insecure=1#h"),
     )
 });
+
+fn tls_in(d: &std::path::Path, alpn: Option<&str>) -> Value {
+    let (k, c) = keypair(d);
+    let mut t =
+        json!({"enabled":true,"server_name":"example.com","key_path":k,"certificate_path":c});
+    if let Some(a) = alpn {
+        t["alpn"] = json!([a]);
+    }
+    t
+}
+
+case!(tuic, |p, d| {
+    (
+    json!({"type":"tuic","listen":"127.0.0.1","listen_port":p,"users":[{"uuid":UUID,"password":"pw-tuic-1234"}],"congestion_control":"bbr","tls":tls_in(d, Some("h3"))}),
+    format!("tuic://{UUID}:pw-tuic-1234@127.0.0.1:{p}?sni=example.com&insecure=1&alpn=h3&congestion_control=bbr#tu")
+)
+});
+case!(hysteria1, |p, d| {
+    (
+    json!({"type":"hysteria","listen":"127.0.0.1","listen_port":p,"up_mbps":100,"down_mbps":100,"users":[{"auth_str":"pw-h1-1234"}],"tls":tls_in(d, None)}),
+    format!("hysteria://127.0.0.1:{p}?auth=pw-h1-1234&peer=example.com&insecure=1&upmbps=50&downmbps=100#h1")
+)
+});
+case!(anytls, |p, d| (
+    json!({"type":"anytls","listen":"127.0.0.1","listen_port":p,"users":[{"password":"pw-any-1234"}],"tls":tls_in(d, None)}),
+    format!("anytls://pw-any-1234@127.0.0.1:{p}?sni=example.com&insecure=1#at")
+));
+case!(socks_with_auth, |p, _| (
+    json!({"type":"socks","listen":"127.0.0.1","listen_port":p,"users":[{"username":"u1","password":"pw-socks-1234"}]}),
+    format!("socks5://u1:pw-socks-1234@127.0.0.1:{p}#so")
+));
+case!(http_proxy_with_auth, |p, _| (
+    json!({"type":"http","listen":"127.0.0.1","listen_port":p,"users":[{"username":"u1","password":"pw-http-1234"}]}),
+    format!("http-proxy://u1:pw-http-1234@127.0.0.1:{p}#ht")
+));
