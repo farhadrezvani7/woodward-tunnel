@@ -225,6 +225,17 @@ impl WtApp {
             .map_err(|_| fail("حذف ناموفق بود.", "Deleting failed."))
     }
 
+    /// Text report for support that is safe to share (no names, servers or secrets). Show it to the
+    /// user before they send it. `log_tail` is the app's recent engine output; it is redacted again here.
+    pub fn diagnostic_report(&self, log_tail: Vec<String>) -> String {
+        core_app::diag::report(
+            &self.app,
+            None,
+            &log_tail,
+            &core_engine::runner::Binaries::discover(),
+        )
+    }
+
     /// `dns`: resolvers reached through the tunnel. Mobile always uses the system TUN.
     pub fn launch_plan(&self, id: String, dns: Vec<String>) -> Result<FfiLaunchPlan, FfiError> {
         match self.app.launch_plan(&id, Mode::Tun, dns).map_err(|_| {

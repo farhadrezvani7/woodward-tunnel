@@ -93,6 +93,52 @@ pub fn check_url(url: &str) -> Result<(), FetchError> {
     Ok(())
 }
 
+/// Resolve the host first and refuse names that point into private address space (DNS tricks).
+/// The HTTP client resolves again, so this reduces the risk rather than eliminating it.
+#[cfg(feature = "http")]
+fn check_resolved(url: &str) -> Result<(), FetchError> {
+    use std::net::ToSocketAddrs;
+    let rest = url.strip_prefix("https://").unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or("");
+    let (host, port) = match host.rsplit_once(':') {
+        Some((h, p)) if p.parse::<u16>().is_ok() => (h, p.parse::<u16>().unwrap_or(443)),
+        _ => (host, 443),
+    };
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+    let addrs: Vec<_> = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| FetchError::Failed(e.to_string()))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(FetchError::Failed("no address".into()));
+    }
+    if addrs.iter().any(|a| is_private(a.ip())) {
+        return Err(FetchError::PrivateAddress);
+    }
+    Ok(())
+}
+
+fn is_private(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => {
+            v.is_private()
+                || v.is_loopback()
+                || v.is_link_local()
+                || v.is_unspecified()
+                || v.is_broadcast()
+        }
+        IpAddr::V6(v) => {
+            v.is_loopback()
+                || v.is_unspecified()
+                || (v.segments()[0] & 0xfe00) == 0xfc00
+                || (v.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 #[cfg(feature = "http")]
 pub struct HttpFetcher;
 
@@ -101,6 +147,7 @@ impl Fetcher for HttpFetcher {
     fn get(&self, url: &str) -> Result<String, FetchError> {
         use std::io::Read;
         check_url(url)?;
+        check_resolved(url)?;
         const MAX: u64 = 5 * 1024 * 1024;
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(std::time::Duration::from_secs(20)))

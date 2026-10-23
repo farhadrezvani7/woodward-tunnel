@@ -70,6 +70,8 @@ enum Cmd {
     },
     /// Check secure storage and helper programs
     Doctor,
+    /// Print a diagnostic report that is safe to share (no names, servers or secrets); read it first
+    Diagnostics,
 }
 
 #[derive(Subcommand)]
@@ -276,6 +278,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                     }
                 }
             }
+        }
+        Cmd::Diagnostics => {
+            print!(
+                "{}",
+                core_app::diag::report(&app, None, &[], &Binaries::discover())
+            );
         }
         Cmd::Killswitch { .. } | Cmd::Doctor => {}
     }

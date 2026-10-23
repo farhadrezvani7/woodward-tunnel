@@ -147,6 +147,15 @@ async fn connect_reconnect_and_disconnect() {
     c.disconnect();
     let s = wait_for(&mut rx, UiState::Idle, 10).await;
     assert!(s.connected_since.is_none());
+    let log = c.recent_log().join("\n");
+    assert!(
+        log.contains("sing-box"),
+        "engine output should be kept for diagnostics: {log}"
+    );
+    assert!(
+        !log.contains("pw-ctl-1234"),
+        "password leaked into the diagnostic log"
+    );
     // Port is released after disconnect.
     assert!(probe::wait_listening(
         SocketAddr::from(([127, 0, 0, 1], socks)),

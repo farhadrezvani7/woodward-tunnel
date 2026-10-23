@@ -3,6 +3,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 mod controller;
+pub mod diag;
 mod fetch;
 
 pub use controller::{Controller, ControllerConfig, Status, UiState};

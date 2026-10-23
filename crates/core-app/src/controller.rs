@@ -74,14 +74,42 @@ enum Cmd {
 pub struct Controller {
     tx: mpsc::UnboundedSender<Cmd>,
     status: watch::Receiver<Status>,
+    log: LogBuf,
+}
+
+/// Recent engine output lines, already redacted. Used for the diagnostic report only.
+pub type LogBuf = Arc<std::sync::Mutex<VecDeque<String>>>;
+const LOG_LINES: usize = 300;
+
+fn push_lines(buf: &LogBuf, lines: Vec<(&'static str, String)>) {
+    if let Ok(mut b) = buf.lock() {
+        for (n, l) in lines {
+            b.push_back(format!("{n}: {l}"));
+        }
+        while b.len() > LOG_LINES {
+            b.pop_front();
+        }
+    }
 }
 
 impl Controller {
     pub fn spawn(app: Arc<App>, cfg: ControllerConfig) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let (stx, srx) = watch::channel(Status::idle());
-        tokio::spawn(run(app, cfg, rx, stx));
-        Self { tx, status: srx }
+        let log: LogBuf = Arc::new(std::sync::Mutex::new(VecDeque::new()));
+        tokio::spawn(run(app, cfg, rx, stx, log.clone()));
+        Self {
+            tx,
+            status: srx,
+            log,
+        }
+    }
+    /// Last redacted engine output lines (for a diagnostic report).
+    pub fn recent_log(&self) -> Vec<String> {
+        self.log
+            .lock()
+            .map(|b| b.iter().cloned().collect())
+            .unwrap_or_default()
     }
     pub fn connect(&self, profile_id: &str) {
         let _ = self.tx.send(Cmd::Connect(profile_id.to_string()));
@@ -120,6 +148,7 @@ struct Runner {
     last_failure: Option<FailureKind>,
     insecure: bool,
     queue: VecDeque<Event>,
+    log: LogBuf,
 }
 
 impl Runner {
@@ -225,7 +254,8 @@ impl Runner {
                 }
             }
             Action::StopEngine => {
-                if let Some(t) = self.tunnel.take() {
+                if let Some(mut t) = self.tunnel.take() {
+                    push_lines(&self.log, t.drain_lines());
                     t.stop().await;
                 }
                 self.since = None;
@@ -259,6 +289,7 @@ async fn run(
     cfg: ControllerConfig,
     mut rx: mpsc::UnboundedReceiver<Cmd>,
     tx: watch::Sender<Status>,
+    log: LogBuf,
 ) {
     let mut r = Runner {
         app,
@@ -272,6 +303,7 @@ async fn run(
         last_failure: None,
         insecure: false,
         queue: VecDeque::new(),
+        log,
     };
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     loop {
@@ -298,6 +330,9 @@ async fn run(
                 r.apply(Event::RetryTimerFired, &tx).await;
             }
             _ = tick.tick() => {
+                if let Some(t) = r.tunnel.as_mut() {
+                    push_lines(&r.log, t.drain_lines());
+                }
                 if matches!(r.session.state(), State::Connected | State::Connecting { .. }) {
                     if let Some(t) = r.tunnel.as_mut() {
                         if t.exited().is_some() {
