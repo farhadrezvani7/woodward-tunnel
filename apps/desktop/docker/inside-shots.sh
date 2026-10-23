@@ -50,9 +50,20 @@ sleep 1; shot 06-connecting
 sleep 5; shot 07-connected
 click 78 34           # advanced settings
 sleep 1; shot 08-advanced
-xdotool key Escape; sleep 0.5
+xdotool mousemove 230 400; for _ in 1 2 3 4 5 6; do xdotool click 5; done; sleep 0.5
+shot 08b-advanced-bottom
+click 210 711         # "Diagnostic report"
+sleep 1; shot 08c-diagnostic-fa
+xdotool key Escape; sleep 0.3; xdotool key Escape; sleep 0.5
 click 200 34          # language: English
 sleep 1; shot 09-english-connected
+click 365 32          # advanced (English layout)
+sleep 1; xdotool mousemove 230 400; for _ in 1 2 3 4 5 6; do xdotool click 5; done; sleep 0.5
+shot 09b-advanced-bottom-en
+click 256 711
+sleep 1; shot 09c-diagnostic-en
+xdotool key Escape; sleep 0.3
+xdotool key Escape; sleep 0.5
 click 230 170         # disconnect
 sleep 3; shot 10-english-idle
 kill "$SSPID"; sleep 1

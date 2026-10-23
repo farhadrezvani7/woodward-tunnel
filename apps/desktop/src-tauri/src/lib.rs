@@ -95,6 +95,11 @@ async fn grant_privilege(b: B<'_>) -> Result<(), ApiError> {
 }
 
 #[tauri::command]
+async fn diagnostic_report(b: B<'_>) -> Result<String, ApiError> {
+    blocking(&b, |b| Ok(b.diagnostic_report())).await
+}
+
+#[tauri::command]
 async fn app_info(b: B<'_>) -> Result<AppInfo, ApiError> {
     blocking(&b, |b| Ok(b.info())).await
 }
@@ -198,7 +203,8 @@ pub fn run() {
             get_settings,
             set_settings,
             grant_privilege,
-            app_info
+            app_info,
+            diagnostic_report
         ])
         .build(tauri::generate_context!());
     let app = match app {

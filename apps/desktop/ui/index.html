@@ -113,6 +113,19 @@
     </form>
   </dialog>
 
+  <!-- diagnostic report -->
+  <dialog id="dlg-diag" aria-labelledby="diag-h">
+    <form method="dialog" class="dlg wide">
+      <h2 id="diag-h" data-i18n="diag">گزارش عیب‌یابی</h2>
+      <p class="muted" data-i18n="diagHelp">این گزارش فقط روی همین دستگاه ساخته شده و جایی فرستاده نمی‌شود. آن را بخوانید؛ اگر خواستید کپی کنید و خودتان برای پشتیبانی بفرستید.</p>
+      <textarea id="diag-text" rows="12" readonly spellcheck="false" dir="ltr" aria-labelledby="diag-h"></textarea>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" id="diag-copy" data-i18n="copy">کپی</button>
+        <button type="button" class="btn" data-close data-i18n="close">بستن</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- advanced -->
   <dialog id="dlg-adv" aria-labelledby="adv-h">
     <form method="dialog" class="dlg wide">
@@ -138,6 +151,7 @@
       <div class="dlg-actions">
         <button type="button" class="btn primary" id="adv-save" data-i18n="save">ذخیره</button>
         <button type="button" class="btn" data-close data-i18n="close">بستن</button>
+        <button type="button" class="btn" id="adv-diag" data-i18n="diag">گزارش عیب‌یابی</button>
         <button type="button" class="btn" id="adv-grant" data-i18n="fixPerm" hidden>تنظیم دسترسی</button>
       </div>
     </form>

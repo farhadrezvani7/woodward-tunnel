@@ -139,6 +139,14 @@ async fn import_connect_proxy_mode_and_disconnect() {
     assert!(!format!("{seen:?}").contains("pw-desktop-1234"));
     drop(seen);
 
+    // The diagnostic report after a full connect/disconnect cycle holds no name, host or password.
+    let report = b.diagnostic_report();
+    assert!(report.contains("diagnostic report"), "{report}");
+    for secret in ["Local test", "127.0.0.1", "pw-desktop-1234", &env.ss_port.to_string()] {
+        assert!(!report.contains(secret), "report leaks {secret:?}:\n{report}");
+    }
+    eprintln!("{report}");
+
     // Settings round-trip and validation.
     let mut st = b.settings();
     st.dns = vec!["not a dns!".into()];

@@ -317,6 +317,18 @@ async function refreshInfo() {
 $("adv-grant").addEventListener("click", async () => {
   try { await invoke("grant_privilege"); await refreshInfo(); } catch (e) { toast(t("privFailed"), true); }
 });
+$("adv-diag").addEventListener("click", async () => {
+  try {
+    $("diag-text").value = await invoke("diagnostic_report");
+    openDialog("dlg-diag");
+  } catch (e) { toast(errText(e), true); }
+});
+$("diag-copy").addEventListener("click", async () => {
+  const ta = $("diag-text");
+  try { await navigator.clipboard.writeText(ta.value); }
+  catch (_) { ta.focus(); ta.select(); document.execCommand("copy"); }
+  toast(t("copied"));
+});
 $("adv-save").addEventListener("click", async () => {
   const mode = (document.querySelector('input[name="mode"]:checked') || {}).value || "tun";
   const dns = $("adv-dns").value.split(",").map((x) => x.trim()).filter(Boolean);

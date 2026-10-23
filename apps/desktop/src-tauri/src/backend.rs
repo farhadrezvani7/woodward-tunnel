@@ -454,6 +454,17 @@ impl Backend {
         privilege::grant(self.real_engine()).map_err(|e| ApiError::new("grant_failed", e))
     }
 
+    /// Text the user can review and copy; built from counts, versions and the redacted engine log.
+    /// It is only shown in the UI, never sent anywhere.
+    pub fn diagnostic_report(&self) -> String {
+        let (status, log) = {
+            let c = lock(&self.controller);
+            let s = c.status().borrow().clone();
+            (s, c.recent_log())
+        };
+        core_app::diag::report(&self.app, Some(&status), &log, &self.cfg.bins)
+    }
+
     pub fn info(&self) -> AppInfo {
         let exists = |p: &Path| p.exists() || which(p);
         AppInfo {
