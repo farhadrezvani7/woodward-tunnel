@@ -5,6 +5,8 @@
 #   scripts/build-desktop.sh linux             full Linux bundle (.deb, AppImage) inside Docker -> apps/desktop/dist
 #   scripts/build-desktop.sh native            engines + `tauri build` on this machine (CI: Windows, macOS, Linux)
 #   scripts/build-desktop.sh test              cargo tests (incl. sing-box end-to-end) inside Docker
+#   scripts/build-desktop.sh uitest            UI tests: the real UI code in jsdom with a scripted backend (needs node)
+#   scripts/build-desktop.sh shots             run the built Linux binary under Xvfb + a real keyring, screenshots -> dist/screenshots
 #   scripts/build-desktop.sh shell             interactive shell in the Docker build image
 #
 # Environment: TARGET=<rust target triple> (default: host), WT_OFFLINE=1 (skip the live digest
@@ -119,6 +121,15 @@ case "$cmd" in
     TARGET=x86_64-unknown-linux-gnu fetch_engines x86_64-unknown-linux-gnu
     "$root/scripts/build-engines.sh"   # awg-testserver for the AmneziaWG test
     docker_run --cap-add NET_ADMIN --device /dev/net/tun "$image" bash docker/inside-test.sh
+    ;;
+  uitest)
+    cd "$app"
+    [ -d node_modules/jsdom ] || npm ci --no-audit --no-fund
+    npm run test:ui
+    ;;
+  shots)
+    [ -x "$app/dist/woodward-tunnel" ] || { echo "run 'scripts/build-desktop.sh linux' first" >&2; exit 1; }
+    docker_run "$image" bash docker/inside-shots.sh /work/apps/desktop/dist/woodward-tunnel
     ;;
   shell) docker_run -it "$image" bash ;;
   native)

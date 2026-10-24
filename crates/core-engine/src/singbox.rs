@@ -7,9 +7,12 @@ use core_model::{Profile, Protocol};
 use serde_json::{json, Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Warning {
     /// Profile asked to skip TLS certificate verification.
     InsecureTls,
+    /// SSH profile without a pinned host key: any server key is accepted.
+    SshHostKeyUnverified,
 }
 
 pub struct Built {
@@ -30,7 +33,7 @@ fn truthy(v: Option<String>) -> bool {
     matches!(v.as_deref(), Some("1") | Some("true"))
 }
 
-fn tls(p: &Profile, warnings: &mut Vec<Warning>, force: bool) -> Option<Value> {
+fn tls(p: &Profile, warnings: &mut Vec<Warning>, force: bool, quic: bool) -> Option<Value> {
     let security = s(p, "security").unwrap_or_default();
     let wanted = force || security == "tls" || security == "reality" || security == "xtls";
     if !wanted {
@@ -52,22 +55,48 @@ fn tls(p: &Profile, warnings: &mut Vec<Warning>, force: bool) -> Option<Value> {
         t.insert("insecure".into(), json!(true));
         warnings.push(Warning::InsecureTls);
     }
-    if security == "reality" {
-        let fp = s(p, "fp").unwrap_or_else(|| "chrome".into());
-        t.insert("utls".into(), json!({"enabled": true, "fingerprint": fp}));
-        t.insert("reality".into(), json!({"enabled": true, "public_key": s(p, "pbk").unwrap_or_default(), "short_id": s(p, "sid").unwrap_or_default()}));
-    } else if let Some(fp) = s(p, "fp") {
-        t.insert("utls".into(), json!({"enabled": true, "fingerprint": fp}));
+    if truthy(s(p, "disable_sni")) {
+        t.insert("disable_sni".into(), json!(true));
+    }
+    if let Some(e) = s(p, "ech") {
+        // ECHConfigList (base64) wrapped in the PEM form sing-box expects.
+        let mut lines = vec!["-----BEGIN ECH CONFIGS-----".to_string()];
+        lines.extend(
+            e.as_bytes()
+                .chunks(64)
+                .map(|c| String::from_utf8_lossy(c).into_owned()),
+        );
+        lines.push("-----END ECH CONFIGS-----".to_string());
+        t.insert("ech".into(), json!({"enabled": true, "config": lines}));
+    }
+    if s(p, "tls_fragment").is_some() {
+        t.insert("record_fragment".into(), json!(true));
+    }
+    if !quic {
+        if security == "reality" {
+            let fp = s(p, "fp").unwrap_or_else(|| "chrome".into());
+            t.insert("utls".into(), json!({"enabled": true, "fingerprint": fp}));
+            t.insert("reality".into(), json!({"enabled": true, "public_key": s(p, "pbk").unwrap_or_default(), "short_id": s(p, "sid").unwrap_or_default()}));
+        } else if let Some(fp) = s(p, "fp") {
+            t.insert("utls".into(), json!({"enabled": true, "fingerprint": fp}));
+        }
     }
     Some(Value::Object(t))
 }
 
-fn transport(p: &Profile) -> Option<Value> {
-    match s(p, "type").as_deref() {
+fn transport(p: &Profile) -> Result<Option<Value>, EngineError> {
+    let path = s(p, "path").unwrap_or_else(|| "/".into());
+    Ok(match s(p, "type").as_deref() {
+        None | Some("tcp") => None,
         Some("ws") => {
-            let mut t = json!({"type": "ws", "path": s(p, "path").unwrap_or_else(|| "/".into())});
+            let mut t = json!({"type": "ws", "path": path});
             if let Some(h) = s(p, "host") {
                 t["headers"] = json!({"Host": h});
+            }
+            if let Some(ed) = s(p, "ed").and_then(|v| v.parse::<u32>().ok()) {
+                t["max_early_data"] = json!(ed);
+                t["early_data_header_name"] =
+                    json!(s(p, "edh").unwrap_or_else(|| "Sec-WebSocket-Protocol".into()));
             }
             Some(t)
         }
@@ -75,9 +104,42 @@ fn transport(p: &Profile) -> Option<Value> {
             Some(json!({"type": "grpc", "service_name": s(p, "serviceName").unwrap_or_default()}))
         }
         Some("http") | Some("h2") => {
-            Some(json!({"type": "http", "path": s(p, "path").unwrap_or_else(|| "/".into())}))
+            let mut t = json!({"type": "http", "path": path});
+            if let Some(h) = s(p, "host") {
+                t["host"] = json!(h.split(',').map(str::trim).collect::<Vec<_>>());
+            }
+            Some(t)
         }
-        _ => None,
+        Some("httpupgrade") => {
+            let mut t = json!({"type": "httpupgrade", "path": path});
+            if let Some(h) = s(p, "host") {
+                t["host"] = json!(h);
+            }
+            Some(t)
+        }
+        // A transport we cannot run must stop the connection, never degrade to plain TCP.
+        Some(_) => return Err(EngineError::Profile("transport")),
+    })
+}
+
+fn mbps(p: &Profile, new: &str, legacy: &str) -> Option<u32> {
+    s(p, new).or_else(|| s(p, legacy)).and_then(|v| {
+        v.trim_end_matches(|c: char| !c.is_ascii_digit())
+            .parse::<u32>()
+            .ok()
+    })
+}
+
+fn server_ports(p: &Profile, o: &mut Map<String, Value>) {
+    if let Some(r) = s(p, "server_ports") {
+        o.insert(
+            "server_ports".into(),
+            json!(r.split(',').map(str::trim).collect::<Vec<_>>()),
+        );
+        o.remove("server_port");
+        if let Some(h) = s(p, "hop_interval") {
+            o.insert("hop_interval".into(), json!(h));
+        }
     }
 }
 
@@ -105,47 +167,50 @@ fn outbound(p: &Profile, w: &mut Vec<Warning>) -> Result<Value, EngineError> {
     o.insert("server".into(), json!(p.host));
     o.insert("server_port".into(), json!(p.port));
     match p.protocol {
-        Protocol::Vless => {
-            o.insert("type".into(), json!("vless"));
+        Protocol::Vless | Protocol::Vmess => {
+            let vless = p.protocol == Protocol::Vless;
+            o.insert("type".into(), json!(if vless { "vless" } else { "vmess" }));
             o.insert("uuid".into(), json!(secret(p, "uuid")?));
-            if let Some(f) = s(p, "flow") {
-                o.insert("flow".into(), json!(f));
+            if vless {
+                if let Some(f) = s(p, "flow") {
+                    o.insert("flow".into(), json!(f));
+                }
+            } else {
+                o.insert(
+                    "security".into(),
+                    json!(s(p, "cipher").unwrap_or_else(|| "auto".into())),
+                );
+                o.insert(
+                    "alter_id".into(),
+                    json!(s(p, "alter_id")
+                        .and_then(|a| a.parse::<u32>().ok())
+                        .unwrap_or(0)),
+                );
             }
-            if let Some(t) = tls(p, w, false) {
+            match s(p, "packet_encoding").as_deref() {
+                Some("none") => {
+                    o.insert("packet_encoding".into(), json!(""));
+                }
+                Some(e) => {
+                    o.insert("packet_encoding".into(), json!(e));
+                }
+                None => {}
+            }
+            if let Some(t) = tls(p, w, false, false) {
                 o.insert("tls".into(), t);
             }
-            if let Some(t) = transport(p) {
-                o.insert("transport".into(), t);
-            }
-        }
-        Protocol::Vmess => {
-            o.insert("type".into(), json!("vmess"));
-            o.insert("uuid".into(), json!(secret(p, "uuid")?));
-            o.insert(
-                "security".into(),
-                json!(s(p, "cipher").unwrap_or_else(|| "auto".into())),
-            );
-            o.insert(
-                "alter_id".into(),
-                json!(s(p, "alter_id")
-                    .and_then(|a| a.parse::<u32>().ok())
-                    .unwrap_or(0)),
-            );
-            if let Some(t) = tls(p, w, false) {
-                o.insert("tls".into(), t);
-            }
-            if let Some(t) = transport(p) {
+            if let Some(t) = transport(p)? {
                 o.insert("transport".into(), t);
             }
         }
         Protocol::Trojan => {
             o.insert("type".into(), json!("trojan"));
             o.insert("password".into(), json!(secret(p, "password")?));
-            // Trojan always runs over TLS.
-            if let Some(t) = tls(p, w, true) {
+            // Trojan runs over TLS unless the link said `security=none` explicitly.
+            if let Some(t) = tls(p, w, s(p, "security").as_deref() != Some("none"), false) {
                 o.insert("tls".into(), t);
             }
-            if let Some(t) = transport(p) {
+            if let Some(t) = transport(p)? {
                 o.insert("transport".into(), t);
             }
         }
@@ -156,29 +221,53 @@ fn outbound(p: &Profile, w: &mut Vec<Warning>) -> Result<Value, EngineError> {
                 json!(s(p, "cipher").ok_or(EngineError::Profile("cipher"))?),
             );
             o.insert("password".into(), json!(secret(p, "password")?));
+            if let Some(pl) = s(p, "plugin") {
+                o.insert("plugin".into(), json!(pl));
+                if let Some(po) = s(p, "plugin_opts") {
+                    o.insert("plugin_opts".into(), json!(po));
+                }
+            }
         }
         Protocol::Hysteria2 => {
             o.insert("type".into(), json!("hysteria2"));
             o.insert("password".into(), json!(secret(p, "password")?));
-            if let Some(t) = tls(p, w, true) {
+            if let Some(t) = tls(p, w, true, true) {
                 o.insert("tls".into(), t);
             }
-            if s(p, "obfs").as_deref() == Some("salamander") {
-                o.insert("obfs".into(), json!({"type": "salamander", "password": s(p, "obfs-password").unwrap_or_default()}));
+            if let Some(kind @ ("salamander" | "gecko")) = s(p, "obfs").as_deref() {
+                let mut ob =
+                    json!({"type": kind, "password": s(p, "obfs-password").unwrap_or_default()});
+                for k in ["min_packet_size", "max_packet_size"] {
+                    if let Some(n) = s(p, k).and_then(|v| v.parse::<u32>().ok()) {
+                        ob[k] = json!(n);
+                    }
+                }
+                o.insert("obfs".into(), ob);
             }
+            if let Some(n) = mbps(p, "up_mbps", "upmbps") {
+                o.insert("up_mbps".into(), json!(n));
+            }
+            if let Some(n) = mbps(p, "down_mbps", "downmbps") {
+                o.insert("down_mbps".into(), json!(n));
+            }
+            server_ports(p, &mut o);
         }
         Protocol::Tuic => {
             o.insert("type".into(), json!("tuic"));
             o.insert("uuid".into(), json!(secret(p, "uuid")?));
             o.insert("password".into(), json!(secret(p, "password")?));
-            o.insert(
-                "congestion_control".into(),
-                json!(s(p, "congestion_control").unwrap_or_else(|| "bbr".into())),
-            );
-            if let Some(m) = s(p, "udp_relay_mode") {
-                o.insert("udp_relay_mode".into(), json!(m));
+            for k in ["congestion_control", "udp_relay_mode", "heartbeat"] {
+                if let Some(v) = s(p, k) {
+                    o.insert(k.into(), json!(v));
+                }
             }
-            if let Some(t) = tls(p, w, true) {
+            if truthy(s(p, "zero_rtt")) {
+                o.insert("zero_rtt_handshake".into(), json!(true));
+            }
+            if truthy(s(p, "udp_over_stream")) {
+                o.insert("udp_over_stream".into(), json!(true));
+            }
+            if let Some(t) = tls(p, w, true, true) {
                 o.insert("tls".into(), t);
             }
         }
@@ -187,32 +276,30 @@ fn outbound(p: &Profile, w: &mut Vec<Warning>) -> Result<Value, EngineError> {
             if let Some(a) = p.secrets.get("password") {
                 o.insert("auth_str".into(), json!(a.expose()));
             }
-            let mbps = |k: &str| {
-                s(p, k).and_then(|v| {
-                    v.trim_end_matches(|c: char| !c.is_ascii_digit())
-                        .parse::<u32>()
-                        .ok()
-                })
-            };
             o.insert(
                 "up_mbps".into(),
-                json!(mbps("upmbps").or_else(|| mbps("up")).unwrap_or(50)),
+                json!(mbps(p, "up_mbps", "upmbps")
+                    .or_else(|| mbps(p, "up", "up"))
+                    .unwrap_or(50)),
             );
             o.insert(
                 "down_mbps".into(),
-                json!(mbps("downmbps").or_else(|| mbps("down")).unwrap_or(100)),
+                json!(mbps(p, "down_mbps", "downmbps")
+                    .or_else(|| mbps(p, "down", "down"))
+                    .unwrap_or(100)),
             );
             if let Some(x) = s(p, "obfs") {
                 o.insert("obfs".into(), json!(x));
             }
-            if let Some(t) = tls(p, w, true) {
+            if let Some(t) = tls(p, w, true, true) {
                 o.insert("tls".into(), t);
             }
+            server_ports(p, &mut o);
         }
         Protocol::AnyTls => {
             o.insert("type".into(), json!("anytls"));
             o.insert("password".into(), json!(secret(p, "password")?));
-            if let Some(t) = tls(p, w, true) {
+            if let Some(t) = tls(p, w, true, false) {
                 o.insert("tls".into(), t);
             }
         }
@@ -230,7 +317,7 @@ fn outbound(p: &Profile, w: &mut Vec<Warning>) -> Result<Value, EngineError> {
                 o.insert("username".into(), json!(u));
                 o.insert("password".into(), json!(secret(p, "password")?));
             }
-            if let Some(t) = tls(p, w, false) {
+            if let Some(t) = tls(p, w, false, false) {
                 o.insert("tls".into(), t);
             }
         }
@@ -241,6 +328,12 @@ fn outbound(p: &Profile, w: &mut Vec<Warning>) -> Result<Value, EngineError> {
                 json!(s(p, "username").ok_or(EngineError::Profile("username"))?),
             );
             o.insert("password".into(), json!(secret(p, "password")?));
+            if let Some(k) = s(p, "host_key") {
+                o.insert("host_key".into(), json!([k]));
+            } else {
+                // Without a pinned host key sing-box accepts any key: a man in the middle is possible.
+                w.push(Warning::SshHostKeyUnverified);
+            }
         }
         Protocol::WireGuard | Protocol::AmneziaWg | Protocol::OpenVpn => {
             return Err(EngineError::NotSupported(p.protocol))
@@ -277,12 +370,6 @@ fn wireguard_endpoint(p: &Profile) -> Result<Value, EngineError> {
             peer["reserved"] = json!(v);
         }
     }
-    if let Some(r) = s(p, "reserved") {
-        let v: Vec<u8> = r.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-        if v.len() == 3 {
-            peer["reserved"] = json!(v);
-        }
-    }
     let mut e = json!({"type": "wireguard", "tag": "proxy", "address": addrs, "private_key": secret(p, "private_key")?, "peers": [peer]});
     if let Some(m) = s(p, "mtu").and_then(|m| m.parse::<u32>().ok()) {
         e["mtu"] = json!(m);
@@ -298,6 +385,67 @@ pub struct Options {
     pub upstream_socks: Option<std::net::SocketAddr>,
     /// Addresses that must bypass the tunnel (e.g. a helper engine's server endpoint).
     pub bypass: Vec<std::net::IpAddr>,
+    /// Let QUIC (UDP 443) through. Off by default: many proxy servers relay UDP poorly or not at all,
+    /// and a silently dropped QUIC flow makes YouTube and other apps hang instead of falling back to TCP.
+    pub allow_quic: bool,
+}
+
+/// Public resolver addresses known to serve DoH at `/dns-query` with an IP-valid certificate.
+const DOH_CAPABLE: &[&str] = &[
+    "1.1.1.1",
+    "1.0.0.1",
+    "8.8.8.8",
+    "8.8.4.4",
+    "9.9.9.9",
+    "149.112.112.112",
+    "208.67.222.222",
+    "208.67.220.220",
+];
+
+/// One DNS server entry the system's lookups are sent to, always through the proxy.
+/// Accepts an IP (plain DNS over UDP), `https://host/path` (DoH) or `tls://host` (DoT).
+fn remote_dns_server(spec: Option<&str>) -> Value {
+    let base = |ty: &str| json!({"type": ty, "tag": "remote", "detour": "proxy"});
+    match spec.map(str::trim).filter(|v| !v.is_empty()) {
+        // Default: DNS over HTTPS reaches the resolver over TCP, so it works through every proxy type,
+        // including ones that cannot relay UDP (HTTP, many SOCKS and CDN-fronted setups).
+        None => {
+            let mut v = base("https");
+            v["server"] = json!("1.1.1.1");
+            v["path"] = json!("/dns-query");
+            v
+        }
+        Some(u) if u.starts_with("https://") => {
+            let rest = &u["https://".len()..];
+            let (host, path) = rest
+                .split_once('/')
+                .map(|(h, p)| (h, format!("/{p}")))
+                .unwrap_or((rest, "/dns-query".into()));
+            let mut v = base("https");
+            v["server"] = json!(host);
+            v["path"] = json!(path);
+            v
+        }
+        Some(u) if u.starts_with("tls://") => {
+            let mut v = base("tls");
+            v["server"] = json!(&u["tls://".len()..]);
+            v
+        }
+        // Well-known public resolvers also answer DNS over HTTPS on the same address. Using it keeps DNS
+        // working through proxies that cannot relay UDP (this was a real failure: the app listed
+        // "1.1.1.1, 8.8.8.8" and every lookup died behind a TCP-only upstream).
+        Some(ip) if DOH_CAPABLE.contains(&ip) => {
+            let mut v = base("https");
+            v["server"] = json!(ip);
+            v["path"] = json!("/dns-query");
+            v
+        }
+        Some(ip) => {
+            let mut v = base("udp");
+            v["server"] = json!(ip);
+            v
+        }
+    }
 }
 
 pub fn build(p: &Profile, mode: &Mode, dns: &[String]) -> Result<Built, EngineError> {
@@ -355,15 +503,17 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
     };
     cfg.insert("inbounds".into(), json!([inbound]));
 
-    let dns_server = dns.first().cloned().unwrap_or_else(|| "1.1.1.1".into());
     cfg.insert(
         "dns".into(),
         json!({"servers": [
-        // Application lookups go through the tunnel.
-        {"type": "udp", "tag": "remote", "server": dns_server, "detour": "proxy"},
-        // The VPN server's own hostname cannot be resolved through a tunnel that does not exist yet.
-        {"type": "local", "tag": "bootstrap"}
-    ], "final": "remote"}),
+            // Application lookups go through the tunnel.
+            remote_dns_server(dns.first().map(String::as_str)),
+            // The VPN server's own hostname cannot be resolved through a tunnel that does not exist yet.
+            {"type": "local", "tag": "bootstrap"}
+        ],
+        "final": "remote",
+        // Prefer IPv4 addresses: many servers have no IPv6 egress and apps would otherwise stall on AAAA first.
+        "strategy": "prefer_ipv4"}),
     );
 
     if matches!(p.protocol, Protocol::AmneziaWg) {
@@ -388,11 +538,78 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
         route["auto_detect_interface"] = json!(true);
         // Send every DNS query the system makes to the engine's resolver, which goes through the tunnel,
         // instead of letting it travel to whatever resolver the network handed out.
-        route["rules"] = json!([{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}]);
+        let mut rules = vec![
+            json!({"action": "sniff"}),
+            json!({"protocol": "dns", "action": "hijack-dns"}),
+        ];
+        if !opts.allow_quic {
+            // Reject QUIC so the app falls back to HTTPS over TCP immediately.
+            rules.push(json!({"network": "udp", "port": 443, "action": "reject"}));
+        }
+        route["rules"] = json!(rules);
     }
     cfg.insert("route".into(), route);
     Ok(Built {
         config: Value::Object(cfg),
         warnings,
     })
+}
+
+#[cfg(test)]
+mod dns_tests {
+    use super::*;
+
+    #[test]
+    fn default_and_known_resolvers_use_doh_over_tcp() {
+        for spec in [None, Some("1.1.1.1"), Some("8.8.8.8"), Some(" 9.9.9.9 ")] {
+            assert_eq!(remote_dns_server(spec)["type"], "https", "{spec:?}");
+        }
+        assert_eq!(
+            remote_dns_server(Some("https://dns.example/q"))["path"],
+            "/q"
+        );
+        assert_eq!(remote_dns_server(Some("tls://dns.example"))["type"], "tls");
+    }
+
+    #[test]
+    fn unknown_ip_resolver_stays_plain_udp() {
+        let v = remote_dns_server(Some("192.168.1.1"));
+        assert_eq!(
+            (v["type"].as_str(), v["server"].as_str()),
+            (Some("udp"), Some("192.168.1.1"))
+        );
+    }
+
+    #[test]
+    fn quic_is_rejected_in_tun_mode_unless_allowed() {
+        use core_model::{Profile, Protocol, Secret};
+        use std::collections::BTreeMap;
+        let mut secrets = BTreeMap::new();
+        secrets.insert("password".to_string(), Secret::new("pw-test-1234"));
+        let mut settings = BTreeMap::new();
+        settings.insert("cipher".to_string(), "aes-256-gcm".to_string());
+        let p = Profile {
+            name: "n".into(),
+            protocol: Protocol::Shadowsocks,
+            host: "h.example.com".into(),
+            port: 1,
+            settings,
+            secrets,
+        };
+        let rules = |allow| {
+            build_with(
+                &p,
+                &Options {
+                    mode: Some(Mode::Tun),
+                    allow_quic: allow,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .config["route"]["rules"]
+                .to_string()
+        };
+        assert!(rules(false).contains("\"port\":443") && rules(false).contains("reject"));
+        assert!(!rules(true).contains("reject"));
+    }
 }

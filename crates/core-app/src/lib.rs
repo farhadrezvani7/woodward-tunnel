@@ -4,12 +4,15 @@
 
 mod controller;
 pub mod diag;
+pub mod failure;
 mod fetch;
+mod ks;
 
-pub use controller::{Controller, ControllerConfig, Status, UiState};
+pub use controller::{Controller, ControllerConfig, ControllerOptions, ProbeMode, Status, UiState};
 #[cfg(feature = "http")]
 pub use fetch::HttpFetcher;
 pub use fetch::{FetchError, Fetcher};
+pub use ks::KillSwitchConfig;
 
 use core_engine::singbox::Options;
 use core_engine::Mode;
@@ -69,6 +72,19 @@ pub enum LaunchPlan {
     },
     /// Needs the OpenVPN binary; handled by the desktop runner.
     OpenVpn,
+}
+
+/// Plan for running WireGuard or AmneziaWG natively on a TUN device the platform provides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeWgPlan {
+    pub uapi: String,
+    pub addresses: Vec<String>,
+    pub dns: Vec<String>,
+    pub search_domains: Vec<String>,
+    pub mtu: u16,
+    pub allowed_ips: Vec<String>,
+    pub endpoint_ip: String,
+    pub endpoint_port: u16,
 }
 
 pub struct App {
@@ -158,6 +174,40 @@ impl App {
         Ok(self.store.delete(id)?)
     }
 
+    /// For WireGuard and AmneziaWG profiles: the plan the official apps use (TUN fd handed straight to
+    /// amneziawg-go). `None` for every other protocol.
+    pub fn native_wireguard_plan(&self, id: &str) -> Result<Option<NativeWgPlan>, AppError> {
+        let p = self.profile(id)?;
+        if !matches!(
+            p.protocol,
+            core_model::Protocol::WireGuard | core_model::Protocol::AmneziaWg
+        ) {
+            return Ok(None);
+        }
+        let ip = std::net::ToSocketAddrs::to_socket_addrs(&(p.host.as_str(), p.port))
+            .ok()
+            .and_then(|a| {
+                let all: Vec<_> = a.collect();
+                // Prefer IPv4: it is the safer default on networks with broken IPv6.
+                all.iter()
+                    .find(|x| x.is_ipv4())
+                    .or(all.first())
+                    .map(|x| x.ip())
+            })
+            .ok_or_else(|| StoreError::Db("cannot resolve the server address".into()))?;
+        let n = core_engine::awg::native_plan(&p, ip).map_err(|e| StoreError::Db(e.to_string()))?;
+        Ok(Some(NativeWgPlan {
+            uapi: n.uapi,
+            addresses: n.addresses,
+            dns: n.dns,
+            search_domains: n.search_domains,
+            mtu: n.mtu,
+            allowed_ips: n.allowed_ips,
+            endpoint_ip: n.endpoint_ip.to_string(),
+            endpoint_port: n.endpoint_port,
+        }))
+    }
+
     pub fn launch_plan(
         &self,
         id: &str,
@@ -200,6 +250,7 @@ impl App {
                         dns,
                         upstream_socks: Some(std::net::SocketAddr::from(([127, 0, 0, 1], port))),
                         bypass: vec![ip],
+                        ..Default::default()
                     },
                 )
                 .map_err(|e| StoreError::Db(e.to_string()))?;

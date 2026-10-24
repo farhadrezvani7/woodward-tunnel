@@ -96,6 +96,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         Prefs.setSelectedId(ctx, id)
     }
 
+    /** Set when the user picked another profile while connected: disconnect, then connect to the new one. */
+    @Volatile
+    private var reconnectAfterStop = false
+
+    private val connectionActive: Boolean
+        get() = TunnelState.state.value.let { it is ConnState.Connected || it is ConnState.Connecting || it is ConnState.Reconnecting }
+
+    /** A tap on a profile row. While a tunnel is up this switches to the tapped profile instead of silently doing nothing. */
+    fun choose(id: String) {
+        if (id == _selectedId.value) return
+        val active = connectionActive
+        select(id)
+        if (active) {
+            reconnectAfterStop = true
+            TunnelController.stop(ctx)
+            say(R.string.switching_profile)
+        }
+    }
+
+    /** Called by the activity when the tunnel reaches Disconnected. */
+    fun onDisconnected() {
+        if (reconnectAfterStop) {
+            reconnectAfterStop = false
+            connect()
+        }
+    }
+
     // ---- import ----
 
     fun importText(text: String, group: String = "") = launchImport { it.importText(text, group) }
@@ -107,6 +134,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun requestSubscription(url: String) {
+        if (hostOf(url).isBlank()) {
+            say(R.string.settings_subscription_invalid)
+            return
+        }
+        if (_pendingSubscriptions.value.size >= MAX_PENDING_SUBSCRIPTIONS) return
         _pendingSubscriptions.value = _pendingSubscriptions.value + url
     }
 
@@ -148,9 +180,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _profiles.value = Core.get().list()
                 if (_selectedId.value == null) select(r.added.firstOrNull()?.id ?: _profiles.value.firstOrNull()?.id)
                 else if (r.added.isNotEmpty() && _profiles.value.none { it.id == _selectedId.value }) select(r.added.first().id)
-                if (r.subscriptionUrls.isNotEmpty()) {
-                    _pendingSubscriptions.value = _pendingSubscriptions.value + r.subscriptionUrls
-                }
+                // A hostile text can carry hundreds of URLs; only a few are ever offered, one at a time.
+                r.subscriptionUrls.filter { hostOf(it).isNotBlank() }.forEach { requestSubscription(it) }
                 val added = r.added.size
                 val dup = r.duplicates.toInt()
                 when {
@@ -170,9 +201,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rename(id: String, name: String) = mutate { it.rename(id, name.trim()) }
     fun setGroup(id: String, group: String) = mutate { it.setGroup(id, group.trim()) }
-    fun delete(id: String) = mutate {
-        it.delete(id)
-        if (_selectedId.value == id) select(null)
+    fun delete(id: String) {
+        // Deleting the profile that is running would leave a tunnel nobody can identify: disconnect first.
+        if (id == _selectedId.value && connectionActive) TunnelController.stop(ctx)
+        mutate {
+            it.delete(id)
+            if (_selectedId.value == id) select(null)
+        }
     }
 
     private fun mutate(block: (uniffi.wtcore.WtApp) -> Unit) {
@@ -191,7 +226,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onConnectButton() {
         when (TunnelState.state.value) {
-            is ConnState.Connected, is ConnState.Connecting -> TunnelController.stop(ctx)
+            is ConnState.Connected, is ConnState.Connecting, is ConnState.Reconnecting -> {
+                reconnectAfterStop = false
+                TunnelController.stop(ctx)
+            }
             else -> connect()
         }
     }
@@ -222,11 +260,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onVpnConsentResult(granted: Boolean) {
         val id = _selectedId.value
+        // The user may have pressed the connect button again (cancel) while the system dialog was open.
+        if (TunnelState.state.value !is ConnState.Connecting) return
         if (granted && id != null) TunnelController.start(ctx, id)
         else TunnelState.set(ConnState.Error(R.string.err_vpn_permission))
     }
 
     companion object {
-        fun hostOf(url: String): String = Uri.parse(url).host ?: ""
+        private const val MAX_PENDING_SUBSCRIPTIONS = 5
+        fun hostOf(url: String): String = try { Uri.parse(url).host ?: "" } catch (e: Exception) { "" }
     }
 }

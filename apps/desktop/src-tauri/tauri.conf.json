@@ -17,6 +17,7 @@
         "minWidth": 360,
         "minHeight": 560,
         "resizable": true,
+        "visible": false,
         "dragDropEnabled": true
       }
     ],
@@ -41,7 +42,8 @@
     ],
     "externalBin": ["binaries/wt-sing-box", "binaries/wt-awg-socks"],
     "resources": {
-      "resources/macos-elevate-singbox.sh": "macos-elevate-singbox.sh"
+      "resources/macos-elevate-singbox.sh": "macos-elevate-singbox.sh",
+      "resources/THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
     },
     "linux": {
       "deb": {

@@ -49,8 +49,17 @@ func b64hex(s string) (string, error) {
 }
 
 // awgKeys lists the obfuscation options passed through; anything else is ignored.
+// These are exactly the obfuscation / tuning keys amneziawg-go v3 accepts on its UAPI (device/uapi.go).
 var awgKeys = map[string]bool{"jc": true, "jmin": true, "jmax": true, "s1": true, "s2": true, "s3": true, "s4": true,
-	"h1": true, "h2": true, "h3": true, "h4": true, "i1": true, "i2": true, "i3": true, "i4": true, "i5": true}
+	"h1": true, "h2": true, "h3": true, "h4": true, "i1": true, "i2": true, "i3": true, "i4": true, "i5": true,
+	"header_protection_key": true, "content_padding_addition": true, "rekey_after_time": true, "rekey_timeout": true,
+	"reject_after_time": true, "keepalive_timeout": true, "max_handshake_attempts": true, "random_trailers": true,
+	"disable_cookies": true}
+
+// validAwgValue rejects values that could smuggle extra UAPI lines (newlines) or are absurdly long.
+func validAwgValue(v string) bool {
+	return len(v) <= 4096 && !strings.ContainsAny(v, "\n\r\x00")
+}
 
 func uapi(c *Config, endpoint string) (string, error) {
 	priv, err := b64hex(c.PrivateKey)
@@ -65,7 +74,7 @@ func uapi(c *Config, endpoint string) (string, error) {
 	fmt.Fprintf(&b, "private_key=%s\n", priv)
 	for k, v := range c.Awg {
 		k = strings.ToLower(k)
-		if awgKeys[k] && !strings.ContainsAny(v, "\n\r") {
+		if awgKeys[k] && validAwgValue(v) {
 			fmt.Fprintf(&b, "%s=%s\n", k, v)
 		}
 	}

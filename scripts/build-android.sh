@@ -118,6 +118,7 @@ ensure_keystore() {
 [ "$skip_rust" = 1 ] || build_rust
 
 cd "$android"
+./gradlew --no-daemon --console=plain testDebugUnitTest
 if [ "$debug_only" = 1 ]; then
   ./gradlew --no-daemon --console=plain assembleDebug
 else

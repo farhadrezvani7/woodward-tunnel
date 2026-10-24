@@ -9,8 +9,14 @@ sealed interface ConnState {
     data object Disconnected : ConnState
     data object Connecting : ConnState
 
-    /** [sinceElapsed] is SystemClock.elapsedRealtime() when the tunnel was verified. */
-    data class Connected(val sinceElapsed: Long, val insecureTls: Boolean) : ConnState
+    /**
+     * [sinceElapsed] is SystemClock.elapsedRealtime() when the tunnel was verified. [limits] is non-empty when the
+     * tunnel works but a part of it does not (UDP, one of two test sites, ...): "connected but limited".
+     */
+    data class Connected(val sinceElapsed: Long, val insecureTls: Boolean, val limits: List<Limit> = emptyList()) : ConnState
+
+    /** The tunnel stopped carrying traffic while connected; the service is restarting the engine (attempt counts from 0). */
+    data class Reconnecting(val attempt: Int) : ConnState
 
     /** [message] is a plain-language string resource; technical text is kept apart (see [TunnelState.lastTechnical]). */
     data class Error(@StringRes val message: Int, val coreMessage: String? = null) : ConnState

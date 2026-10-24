@@ -1,0 +1,83 @@
+# cargo-deny policy for the Rust workspace and the desktop (Tauri) crate.
+#
+#   cargo deny --config crates/deny.toml check
+#   cargo deny --config crates/deny.toml --manifest-path apps/desktop/src-tauri/Cargo.toml check
+#
+# CI (.github/workflows/ci.yml, job "supply-chain") runs both. Every ignore carries the decision and
+# the reason; the long form is in docs/audit/upstream-and-supply-chain.md.
+
+[graph]
+# Resolve for every platform we ship, not only the CI host.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "aarch64-apple-ios",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+    "i686-linux-android",
+]
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+unmaintained = "all"
+ignore = [
+    # unsafe-libyaml 0.2.11 (via serde_yaml_ng 0.10, Clash YAML import, input capped at 256 KiB).
+    { id = "RUSTSEC-2024-0449", reason = "unmaintained libyaml port; input size-capped; replacement plan in the audit document" },
+    # zbus stack (via keyring 3.x Secret Service backend on Linux).
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained; Linux Secret Service only; track keyring 4.x" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained; Linux Secret Service only; track keyring 4.x" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained; Linux Secret Service only; track keyring 4.x" },
+    # uniffi 0.29 build-time binding generator only; never linked into a shipped binary.
+    { id = "RUSTSEC-2026-0374", reason = "basic-toml unmaintained; uniffi_bindgen build tool only" },
+    # Tauri 2 Linux stack (gtk3-rs, wry, WebKitGTK); not under our control.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; compile-time only, via the Tauri GTK3 stack" },
+    { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsound; Linux Tauri stack, iterator not used by this app" },
+]
+
+[licenses]
+# Every license in the dependency graph today is on this list. Strong copyleft is deliberately
+# absent, so a new crate under GPL/AGPL/LGPL-only terms fails CI and gets a human decision.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "Unlicense",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+# Workspace path dependencies carry no version and cargo-deny treats unpublished-looking crates as public;
+# a registry wildcard would still show up as a warning in CI output.
+wildcards = "warn"
+allow-wildcard-paths = true
+highlight = "all"
+# TLS stays rustls; no second TLS stack and no OpenSSL in the Rust graph.
+deny = [
+    { crate = "openssl" },
+    { crate = "openssl-sys" },
+    { crate = "native-tls" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

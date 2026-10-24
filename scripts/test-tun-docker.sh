@@ -6,7 +6,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 cargo build -q -p core-app --example tunnel_e2e
 SB="$(command -v sing-box)"
-EX="$root/target/debug/examples/tunnel_e2e"
+EX="${CARGO_TARGET_DIR:-$root/target}/debug/examples/tunnel_e2e"
 NET=wt-e2e-net
 NET2=wt-e2e-net2
 IMG=fedora:latest
@@ -27,8 +27,11 @@ server { listen 8080; location / { default_type text/plain; return 200 "$remote_
 NGINX
 docker run -d --name wt-e2e-web --network $NET2 --ip 172.31.8.20 -v /tmp/wt-e2e-nginx.conf:/etc/nginx/conf.d/default.conf:ro nginx:alpine >/dev/null
 sleep 3
-docker run --rm --name wt-e2e-client --network $NET --ip 172.31.7.30 --cap-add NET_ADMIN --device /dev/net/tun \
+out="$(docker run --rm --name wt-e2e-client --network $NET --ip 172.31.7.30 --cap-add NET_ADMIN --device /dev/net/tun \
   -v "$SB":/usr/bin/sing-box:ro -v "$EX":/usr/bin/tunnel_e2e:ro $IMG bash -c '
 dnf -y -q install nftables iproute procps-ng >/dev/null 2>&1
-tunnel_e2e "ss://aes-256-gcm:tun-e2e-pw-1234@wt-e2e-server:8388#e2e" 172.31.8.20:8080 172.31.7.10
-'
+tunnel_e2e "ss://aes-256-gcm:tun-e2e-pw-1234@wt-e2e-server:8388#e2e" 172.31.8.20:8080
+' 2>&1)" || { echo "$out"; echo "FAIL: client exited non-zero"; exit 1; }
+echo "$out"
+echo "$out" | grep -q "^RESULT fails=0" || { echo "FAIL"; exit 1; }
+echo "PASS: kill switch integration"

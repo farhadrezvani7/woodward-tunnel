@@ -4,9 +4,12 @@
   "version": "0.1.0",
   "license": "Apache-2.0",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:ui": "node --test ui-tests/ui.test.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.1"
-  }
+    "@tauri-apps/cli": "2.12.1",
+    "jsdom": "^26.1.0"
+  },
+  "type": "module"
 }

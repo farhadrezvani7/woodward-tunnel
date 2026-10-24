@@ -142,6 +142,22 @@ impl Fetcher for Http {
     }
 }
 
+/// How the official WireGuard/AmneziaWG apps run: hand the VpnService TUN fd to amneziawg-go.
+#[derive(uniffi::Record)]
+pub struct FfiNativeWgPlan {
+    /// UAPI text for `IpcSet`.
+    pub uapi: String,
+    /// CIDR addresses for the TUN interface.
+    pub addresses: Vec<String>,
+    pub dns: Vec<String>,
+    pub search_domains: Vec<String>,
+    pub mtu: u16,
+    /// Routes to install (the peer's AllowedIPs).
+    pub allowed_ips: Vec<String>,
+    pub endpoint_ip: String,
+    pub endpoint_port: u16,
+}
+
 #[derive(uniffi::Object)]
 pub struct WtApp {
     app: App,
@@ -229,6 +245,26 @@ impl WtApp {
     /// user before they send it. `log_tail` is the app's recent engine output; it is redacted again here.
     pub fn diagnostic_report(&self, log_tail: Vec<String>) -> String {
         core_app::diag::report_embedded(&self.app, None, &log_tail)
+    }
+
+    /// For WireGuard and AmneziaWG profiles: the native plan (preferred on Android); `None` otherwise.
+    pub fn native_wireguard_plan(&self, id: String) -> Result<Option<FfiNativeWgPlan>, FfiError> {
+        let r = self.app.native_wireguard_plan(&id).map_err(|_| {
+            fail(
+                "این کانفیگ آماده اتصال نیست.",
+                "This config is not ready to connect.",
+            )
+        })?;
+        Ok(r.map(|n| FfiNativeWgPlan {
+            uapi: n.uapi,
+            addresses: n.addresses,
+            dns: n.dns,
+            search_domains: n.search_domains,
+            mtu: n.mtu,
+            allowed_ips: n.allowed_ips,
+            endpoint_ip: n.endpoint_ip,
+            endpoint_port: n.endpoint_port,
+        }))
     }
 
     /// `dns`: resolvers reached through the tunnel. Mobile always uses the system TUN.

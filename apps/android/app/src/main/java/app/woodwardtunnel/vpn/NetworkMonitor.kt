@@ -27,6 +27,10 @@ class NetworkMonitor(context: Context) {
 
     @Volatile
     private var listener: InterfaceUpdateListener? = null
+
+    /** Called (on the monitor thread) whenever the real default network changes; used to re-check the tunnel soon. */
+    @Volatile
+    var onChanged: (() -> Unit)? = null
     private var registered = false
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
@@ -77,8 +81,10 @@ class NetworkMonitor(context: Context) {
     }
 
     private fun update(network: Network?) {
+        val changed = current != network
         current = network
         report(network)
+        if (changed) onChanged?.invoke()
     }
 
     /** Runs on the handler thread: link properties can lag behind the callback, hence the retries. */

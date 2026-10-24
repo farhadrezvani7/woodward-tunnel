@@ -8,6 +8,7 @@ lifecycle = "2.9.4"
 coreKtx = "1.17.0"
 jna = "5.17.0"
 zxing = "4.3.0"
+junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -21,6 +22,7 @@ compose-material3 = { module = "androidx.compose.material3:material3" }
 compose-material-icons = { module = "androidx.compose.material:material-icons-core" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+junit = { module = "junit:junit", version.ref = "junit" }
 zxing-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxing" }
 
 [plugins]

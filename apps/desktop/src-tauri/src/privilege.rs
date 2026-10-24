@@ -17,6 +17,21 @@ pub enum PrivState {
 
 pub const LINUX_CAPS: &str = "cap_net_admin,cap_net_bind_service,cap_net_raw+ep";
 
+/// Whether this process may change firewall rules itself (root, or the Windows administrator the
+/// manifest asks for).
+#[cfg(windows)]
+pub fn is_elevated() -> bool {
+    true
+}
+#[cfg(all(unix, not(target_os = "linux")))]
+pub fn is_elevated() -> bool {
+    std::process::Command::new("id").arg("-u").output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0").unwrap_or(false)
+}
+#[cfg(target_os = "linux")]
+pub fn is_elevated() -> bool {
+    is_root()
+}
+
 #[cfg(target_os = "linux")]
 fn is_root() -> bool {
     std::fs::read_to_string("/proc/self/status")

@@ -25,6 +25,10 @@ on:
 env:
   SING_BOX_TAG: v1.14.3
 
+# Least privilege: these workflows only read the repository and upload build artifacts.
+permissions:
+  contents: read
+
 jobs:
   # Pure-Swift logic (state machine, secret vault, handoff files, parsing) type-checks and its
   # tests run on Linux; every other Swift file is only syntax-checked here.
@@ -32,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     container: swift:6.0-noble
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: apps/ios/scripts/typecheck-linux.sh
       - run: python3 apps/ios/scripts/check-strings.py
 
@@ -40,17 +44,18 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: maxim-lobanov/setup-xcode@v1
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: latest-stable
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
         with:
+          toolchain: stable
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -59,13 +64,13 @@ jobs:
           key: ios-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: ios-cargo-
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: stable
           cache: false
 
       - name: Cache libbox build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             build/sing-box-${{ env.SING_BOX_TAG }}
@@ -73,8 +78,16 @@ jobs:
             ~/Library/Caches/go-build
           key: ios-libbox-${{ env.SING_BOX_TAG }}-${{ hashFiles('scripts/build-ios.sh') }}
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen (pinned release, SHA-256 verified)
+        # UNVERIFIED on a Mac: the zip layout (xcodegen/bin/xcodegen) is assumed from upstream's
+        # packaging. The digest is the one GitHub publishes for release 2.46.0 (2026-07-16).
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip
+          echo "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen-dist"
+          echo "$RUNNER_TEMP/xcodegen-dist/xcodegen/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/xcodegen-dist/xcodegen/bin/xcodegen" --version
 
       - name: Rust core and Swift bindings
         run: scripts/build-ios.sh rust
@@ -98,7 +111,7 @@ jobs:
           cd apps/ios/build
           ditto -c -k --keepParent WoodwardTunnel.xcarchive WoodwardTunnel-unsigned.xcarchive.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: WoodwardTunnel-unsigned-xcarchive
           path: apps/ios/build/WoodwardTunnel-unsigned.xcarchive.zip

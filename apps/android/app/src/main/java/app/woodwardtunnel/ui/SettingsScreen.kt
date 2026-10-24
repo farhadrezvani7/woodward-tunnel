@@ -4,7 +4,15 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,10 +21,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalTextStyle
@@ -44,7 +54,10 @@ import androidx.compose.ui.unit.dp
 import app.woodwardtunnel.BuildConfig
 import app.woodwardtunnel.R
 import app.woodwardtunnel.bindings.Core
+import app.woodwardtunnel.vpn.ConnectionTest
 import app.woodwardtunnel.vpn.EngineLog
+import app.woodwardtunnel.vpn.Level
+import app.woodwardtunnel.vpn.TestItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,23 +70,35 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSubscription: (String) -> Unit,
     onMessage: (Int) -> Unit,
+    activeProtocol: String? = null,
 ) {
     val ctx = LocalContext.current
     var dns by remember { mutableStateOf(Prefs.dnsServers(ctx).joinToString(", ")) }
     var dnsError by remember { mutableStateOf(false) }
     var sub by remember { mutableStateOf("") }
     var report by remember { mutableStateOf<String?>(null) }
+    var testRunning by remember { mutableStateOf(false) }
+    var testItems by remember { mutableStateOf<List<TestItem>?>(null) }
+    var testShown by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     var subError by remember { mutableStateOf(false) }
 
     Column(
-        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+        Modifier.widthIn(max = 640.dp).fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("‹ " + stringResource(R.string.action_back)) }
+            TextButton(onClick = onBack) {
+                // Mirrors automatically in right-to-left layouts.
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.action_back))
+            }
         }
-        Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() },
+        )
         Text(stringResource(R.string.settings_warning), style = MaterialTheme.typography.bodyMedium)
 
         HorizontalDivider()
@@ -135,12 +160,39 @@ fun SettingsScreen(
             Text(stringResource(R.string.settings_killswitch_open))
         }
 
+        if (Build.VERSION.SDK_INT >= 33) {
+            HorizontalDivider()
+            Text(stringResource(R.string.settings_language_title), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.settings_language_body), style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = {
+                runCatching {
+                    ctx.startActivity(
+                        Intent(Settings.ACTION_APP_LOCALE_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }) { Text(stringResource(R.string.settings_language_open)) }
+        }
+
         HorizontalDivider()
         Text(stringResource(R.string.settings_details_title), style = MaterialTheme.typography.titleMedium)
         Text(
             TunnelState.lastTechnical ?: stringResource(R.string.settings_details_none),
             style = MaterialTheme.typography.bodySmall,
         )
+
+        HorizontalDivider()
+        Text(stringResource(R.string.settings_test_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.settings_test_body), style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(enabled = !testRunning, onClick = {
+            testRunning = true
+            testShown = true
+            testItems = null
+            scope.launch {
+                testItems = withContext(Dispatchers.IO) { ConnectionTest.run(ctx) }
+                testRunning = false
+            }
+        }) { Text(stringResource(R.string.settings_test_button)) }
 
         HorizontalDivider()
         Text(stringResource(R.string.settings_diag_title), style = MaterialTheme.typography.titleMedium)
@@ -150,7 +202,8 @@ fun SettingsScreen(
                 report = withContext(Dispatchers.IO) {
                     try {
                         Core.init(ctx)
-                        Core.get().diagnosticReport(EngineLog.snapshot())
+                        Core.get().diagnosticReport(EngineLog.snapshot()) +
+                            "\n\nconnection health:\n" + ConnectionTest.reportLines().joinToString("\n") { "  $it" } + "\n"
                     } catch (e: Exception) {
                         ""
                     }
@@ -165,6 +218,50 @@ fun SettingsScreen(
             style = MaterialTheme.typography.bodySmall,
         )
         Spacer(Modifier.height(32.dp))
+    }
+
+    if (testShown) {
+        AlertDialog(
+            onDismissRequest = { if (!testRunning) testShown = false },
+            title = { Text(stringResource(R.string.settings_test_title)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    when {
+                        testRunning -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Text(stringResource(R.string.ct_running))
+                        }
+                        testItems == null -> Text(stringResource(R.string.ct_need_connect))
+                        else -> {
+                            testItems!!.forEach { item ->
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            when (item.level) { Level.OK -> "✓"; Level.WARN -> "!"; Level.FAIL -> "✗"; Level.INFO -> "i" },
+                                            color = when (item.level) {
+                                                Level.OK -> StateColors.connected
+                                                Level.WARN -> StateColors.connecting
+                                                Level.FAIL -> StateColors.error
+                                                Level.INFO -> StateColors.idle
+                                            },
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(stringResource(item.title), fontWeight = FontWeight.Medium)
+                                    }
+                                    Text(stringResource(item.note), style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            if (activeProtocol != null) {
+                                Text(stringResource(R.string.ct_protocol, activeProtocol), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(enabled = !testRunning, onClick = { testShown = false }) { Text(stringResource(R.string.action_close)) } },
+        )
     }
 
     report?.let { text ->
@@ -187,7 +284,12 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("diagnostic report", text))
+                    val clip = ClipData.newPlainText("diagnostic report", text)
+                    // Android 13+: hide the copied text from the clipboard preview overlay.
+                    clip.description.extras = android.os.PersistableBundle().apply {
+                        putBoolean("android.content.extra.IS_SENSITIVE", true)
+                    }
+                    cm.setPrimaryClip(clip)
                     onMessage(R.string.settings_diag_copied)
                 }) { Text(stringResource(R.string.settings_diag_copy)) }
             },

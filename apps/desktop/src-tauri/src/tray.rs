@@ -12,12 +12,19 @@ struct Items {
     quit: MenuItem<tauri::Wry>,
 }
 
-fn labels(lang: &str, active: bool) -> (&'static str, &'static str, &'static str, &'static str) {
-    match (lang, active) {
-        ("en", false) => ("Show window", "Connect", "Quit", "Woodward Tunnel: disconnected"),
-        ("en", true) => ("Show window", "Disconnect", "Quit", "Woodward Tunnel: connected"),
-        (_, false) => ("نمایش پنجره", "اتصال", "خروج", "Woodward Tunnel: قطع"),
-        (_, true) => ("نمایش پنجره", "قطع اتصال", "خروج", "Woodward Tunnel: وصل"),
+/// Menu labels and tooltip. The tooltip only says "connected" for the state `connected`:
+/// connecting and reconnecting get their own text.
+fn labels(lang: &str, state: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+    let active = !matches!(state, "idle" | "failed");
+    match (lang, state) {
+        ("en", "connected") => ("Show window", "Disconnect", "Quit", "Woodward Tunnel: connected"),
+        ("en", "reconnecting") => ("Show window", "Disconnect", "Quit", "Woodward Tunnel: no internet, reconnecting"),
+        ("en", _) if active => ("Show window", "Cancel", "Quit", "Woodward Tunnel: connecting"),
+        ("en", _) => ("Show window", "Connect", "Quit", "Woodward Tunnel: disconnected"),
+        (_, "connected") => ("نمایش پنجره", "قطع اتصال", "خروج", "Woodward Tunnel: وصل"),
+        (_, "reconnecting") => ("نمایش پنجره", "قطع اتصال", "خروج", "Woodward Tunnel: اینترنت قطع است، در حال اتصال دوباره"),
+        (_, _) if active => ("نمایش پنجره", "لغو", "خروج", "Woodward Tunnel: در حال اتصال"),
+        _ => ("نمایش پنجره", "اتصال", "خروج", "Woodward Tunnel: قطع"),
     }
 }
 
@@ -30,7 +37,7 @@ fn show_window(app: &AppHandle) {
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let (s, t, q, _) = labels("fa", false);
+    let (s, t, q, _) = labels("fa", "idle");
     let show = MenuItem::with_id(app, "show", s, true, None::<&str>)?;
     let toggle = MenuItem::with_id(app, "toggle", t, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", q, true, None::<&str>)?;
@@ -71,9 +78,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 pub fn refresh(app: &AppHandle) {
     let (Some(items), Some(backend)) = (app.try_state::<Items>(), app.try_state::<Arc<Backend>>()) else { return };
     let st = backend.status();
-    let active = !matches!(st.state, "idle" | "failed");
-    let lang = backend.settings().lang;
-    let (s, t, q, tip) = labels(&lang, active);
+    let lang = backend.settings().resolved_lang();
+    let (s, t, q, tip) = labels(lang, st.state);
     let _ = items.show.set_text(s);
     let _ = items.toggle.set_text(t);
     let _ = items.quit.set_text(q);

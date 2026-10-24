@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.zxing.embedded)
     // sing-box's gomobile library, built by scripts/build-android.sh.
     implementation(files("libs/libbox.aar"))
+    testImplementation(libs.junit)
 }
 
 tasks.register("checkNativeInputs") {

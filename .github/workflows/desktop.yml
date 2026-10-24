@@ -6,6 +6,10 @@ on:
     paths: ["apps/desktop/**", "crates/**", "engines/**", "scripts/build-desktop.sh", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
+# Least privilege: these workflows only read the repository and upload build artifacts.
+permissions:
+  contents: read
+
 jobs:
   bundle:
     strategy:
@@ -30,18 +34,19 @@ jobs:
             bundles: dmg
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: engines/awg-socks/go.mod
           cache-dependency-path: engines/awg-socks/go.sum
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: apps/desktop/src-tauri
       - name: Linux system packages
@@ -62,7 +67,7 @@ jobs:
           #        APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID (signing + notarization)
           # Windows: configure bundle.windows.signCommand or certificateThumbprint
         run: scripts/build-desktop.sh native
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: woodward-tunnel-${{ matrix.name }}
           if-no-files-found: error
@@ -76,12 +81,14 @@ jobs:
   e2e-linux:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: engines/awg-socks/go.mod
           cache-dependency-path: engines/awg-socks/go.sum
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: stable
       - name: Linux system packages
         run: |
           sudo apt-get update
@@ -92,3 +99,16 @@ jobs:
           scripts/build-desktop.sh engines x86_64-unknown-linux-gnu
           cd apps/desktop/src-tauri
           WT_SING_BOX="$PWD/binaries/wt-sing-box-x86_64-unknown-linux-gnu" cargo test --release
+
+  ui-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - name: UI tests (real UI code in jsdom, scripted backend)
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run test:ui

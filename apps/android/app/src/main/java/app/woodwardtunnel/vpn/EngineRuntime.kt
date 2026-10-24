@@ -40,7 +40,19 @@ object EngineRuntime {
      */
     fun wipeSnapshots(context: Context) {
         val base = File(context.filesDir, "engine")
-        File(base, "configuration.json").delete()
         base.resolve("crash_reports").deleteRecursively()
+        blockSnapshot(base)
+    }
+
+    /**
+     * libbox writes the running configuration with `os.WriteFile(<base>/configuration.json)` and ignores errors.
+     * A directory with that name makes the write fail (EISDIR), so the credentials never touch the disk at all.
+     */
+    private fun blockSnapshot(base: File) {
+        val f = File(base, "configuration.json")
+        if (f.isDirectory) return
+        f.delete()
+        base.mkdirs()
+        f.mkdir()
     }
 }

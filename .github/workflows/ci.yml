@@ -3,6 +3,10 @@ on:
   push:
   pull_request:
 
+# Least privilege: these workflows only read the repository and upload build artifacts.
+permissions:
+  contents: read
+
 jobs:
   rust:
     strategy:
@@ -11,14 +15,15 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
         with:
+          toolchain: stable
           components: clippy, rustfmt
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: engines/awg-socks/go.mod
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build Go helper engines
         shell: bash
         run: ./scripts/build-engines.sh
@@ -35,16 +40,38 @@ jobs:
   go-helper:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: engines/awg-socks/go.mod
       - run: go vet ./... && go test ./...
         working-directory: engines/awg-socks
 
-  audit:
+  supply-chain:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-audit --locked && cargo audit
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          toolchain: stable
+      - name: Install audit tools (locked)
+        run: cargo install cargo-audit cargo-deny --locked
+      - name: cargo audit (workspace)
+        run: cargo audit
+      - name: cargo audit (desktop)
+        run: cargo audit --file apps/desktop/src-tauri/Cargo.lock
+      - name: "cargo deny (workspace, advisories licenses bans sources)"
+        run: cargo deny --config crates/deny.toml check
+      - name: cargo deny (desktop)
+        run: cargo deny --config crates/deny.toml --manifest-path apps/desktop/src-tauri/Cargo.toml check
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: engines/awg-socks/go.mod
+      - name: govulncheck (Go helper)
+        working-directory: engines/awg-socks
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

@@ -3,10 +3,11 @@
 //! usage: tunnel_e2e <share link> <web host:port> <server ip>
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use core_app::{App, Controller, ControllerConfig, HttpFetcher, UiState};
+use core_app::{
+    App, Controller, ControllerConfig, ControllerOptions, HttpFetcher, ProbeMode, UiState,
+};
 use core_engine::runner::Binaries;
 use core_engine::Mode;
-use core_policy::KillSwitch;
 use core_store::MemorySecretStore;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -40,14 +41,25 @@ async fn wait(rx: &mut tokio::sync::watch::Receiver<core_app::Status>, want: UiS
     });
 }
 
+fn nft_active() -> bool {
+    Command::new("nft")
+        .args(["list", "table", "inet", "wt_killswitch"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn check(name: &str, ok: bool, fails: &mut u32) {
+    println!("CHECK {name}={}", if ok { "PASS" } else { "FAIL" });
+    if !ok {
+        *fails += 1;
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let a: Vec<String> = std::env::args().collect();
-    let (link, web, server_ip) = (
-        &a[1],
-        a[2].parse::<SocketAddr>().unwrap(),
-        a[3].parse().unwrap(),
-    );
+    let (link, web) = (&a[1], a[2].parse::<SocketAddr>().unwrap());
     let dir = std::env::temp_dir().join("wt-tun-e2e");
     let app = Arc::new(
         App::new(
@@ -66,19 +78,26 @@ async fn main() {
         ready_timeout: Duration::from_secs(20),
         work_dir: dir.join("run"),
     };
-    let c = Controller::spawn(app, cfg);
+    // Leak protection is part of the controller now: nothing is applied by hand here.
+    let mut opts = ControllerOptions::recommended(&cfg);
+    opts.probe_mode = ProbeMode::Tcp; // the test network has no DNS-over-HTTPS reachable
+    opts.health_interval = None;
+    let c = Controller::spawn_with(app, cfg, opts);
     let mut rx = c.status();
+    let mut fails = 0u32;
 
-    println!(
-        "DIRECT_BEFORE_VPN_REACHABLE={}",
-        get(web, Duration::from_secs(3)).is_ok()
-    );
+    check("no_rules_before_connect", !nft_active(), &mut fails);
     c.connect(&id);
     wait(&mut rx, UiState::Connected, 40).await;
     println!("CONNECTED");
-    println!(
-        "VIA_TUNNEL_SEEN_AS={}",
-        get(web, Duration::from_secs(5)).unwrap()
+    check("rules_after_verified", nft_active(), &mut fails);
+    check("status_flag", rx.borrow().kill_switch_active, &mut fails);
+    let seen_as = get(web, Duration::from_secs(5));
+    println!("VIA_TUNNEL_SEEN_AS={seen_as:?}");
+    check(
+        "traffic_through_tunnel_with_rules",
+        seen_as.is_ok(),
+        &mut fails,
     );
 
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -91,43 +110,38 @@ async fn main() {
             }
         });
     }
-    // Leak protection on, then kill the engine as if the tunnel dropped.
-    KillSwitch {
-        tun_iface: "wt0".into(),
-        server_ips: vec![server_ip],
-        allow_lan: false,
-    }
-    .apply()
-    .unwrap();
-    println!(
-        "TUNNEL_STILL_WORKS_WITH_KILLSWITCH={}",
-        get(web, Duration::from_secs(5)).is_ok()
-    );
+    // The engine dies without warning (as if the tunnel dropped).
     let _ = Command::new("pkill")
         .args(["-9", "-f", "sing-box run"])
         .status();
     tokio::time::sleep(Duration::from_millis(300)).await;
     let leaked = get(web, Duration::from_secs(2));
-    println!("KILLSWITCH_BLOCKED={}", leaked.is_err());
-    // Recovery can be quick (the server stays reachable under the kill switch), so look at the recorded history.
+    check("blocked_while_tunnel_down", leaked.is_err(), &mut fails);
+    check("rules_kept_while_down", nft_active(), &mut fails);
     wait(&mut rx, UiState::Connected, 60).await;
     {
         let h = seen.lock().unwrap();
-        println!(
-            "RECONNECTING_SEEN={} messages={:?}",
-            h.iter().any(|st| st.state == UiState::Reconnecting),
-            h.iter().filter_map(|st| st.message.clone()).next()
+        check(
+            "reconnect_seen_with_rules",
+            h.iter()
+                .any(|st| st.state == UiState::Reconnecting && st.kill_switch_active),
+            &mut fails,
         );
     }
-    KillSwitch::remove().unwrap();
-    println!(
-        "RECOVERED VIA_TUNNEL_SEEN_AS={}",
-        get(web, Duration::from_secs(5)).unwrap()
-    );
+    check("rules_after_recovery", nft_active(), &mut fails);
+    let again = get(web, Duration::from_secs(5));
+    check("recovered_through_tunnel", again.is_ok(), &mut fails);
+
     c.disconnect();
     wait(&mut rx, UiState::Idle, 15).await;
-    println!(
-        "DISCONNECTED DIRECT_REACHABLE={}",
-        get(web, Duration::from_secs(3)).is_ok()
+    check("rules_removed_on_disconnect", !nft_active(), &mut fails);
+    check(
+        "status_flag_cleared",
+        !rx.borrow().kill_switch_active,
+        &mut fails,
     );
+    println!("RESULT fails={fails}");
+    if fails > 0 {
+        std::process::exit(1);
+    }
 }

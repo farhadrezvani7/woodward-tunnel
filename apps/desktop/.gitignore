@@ -5,3 +5,4 @@ src-tauri/binaries/*
 !src-tauri/binaries/.gitkeep
 dist/
 .cache/
+src-tauri/resources/THIRD-PARTY-NOTICES.md

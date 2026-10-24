@@ -18,6 +18,8 @@ object TunnelController {
         val svc = TunnelService.instance
         if (svc == null) {
             TunnelState.set(ConnState.Disconnected)
+            // The service may be about to start (the start intent is already queued): tell it to stand down.
+            runCatching { context.startService(Intent(context, TunnelService::class.java).setAction(TunnelService.ACTION_STOP)) }
             return
         }
         svc.requestStop()

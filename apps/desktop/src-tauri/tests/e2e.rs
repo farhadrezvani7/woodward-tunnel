@@ -73,6 +73,7 @@ async fn setup(tag: &str, settings: Settings, probe_addr: Option<SocketAddr>, se
     );
     if let Some(p) = probe_addr {
         cfg.probe = p;
+        cfg.tcp_probe = true;
     }
     cfg.ready_timeout = Duration::from_secs(15);
     cfg.initial = Some(settings);
@@ -212,6 +213,7 @@ fn plain_backend(tag: &str, bins: Binaries, settings: Settings, probe: Option<So
     let mut cfg = BackendConfig::new(dir.join("app"), bins, "memory");
     if let Some(p) = probe {
         cfg.probe = p;
+        cfg.tcp_probe = true;
     }
     cfg.ready_timeout = Duration::from_secs(15);
     cfg.initial = Some(settings);

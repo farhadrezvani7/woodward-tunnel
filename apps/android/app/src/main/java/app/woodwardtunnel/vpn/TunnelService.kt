@@ -12,6 +12,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import android.os.SystemClock
 import android.system.OsConstants
 import android.util.Log
@@ -46,6 +47,7 @@ import java.net.InetAddress
 import java.net.InterfaceAddress
 import java.net.NetworkInterface
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
 import io.nekohasekai.libbox.Notification as LibboxNotification
 import uniffi.wtcore.FfiLaunchPlan
@@ -82,6 +84,23 @@ class TunnelService : VpnService(), PlatformInterface {
     private var tun: ParcelFileDescriptor? = null
     private var monitor: NetworkMonitor? = null
     private var awgRunning = false
+    private var profileId: String? = null
+
+    @Volatile
+    private var engineBusy = false
+    private val healthMachine = HealthMachine()
+    private val healthLock = Any()
+    private var healthTask: java.util.concurrent.ScheduledFuture<*>? = null
+    private val health = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { Thread(it, "wt-health").apply { isDaemon = true } }
+    private val connectivity by lazy { getSystemService(android.net.ConnectivityManager::class.java) }
+
+    /** Number of automatic reconnects in this session (for the diagnostic report). */
+    @Volatile
+    var reconnects = 0
+        private set
+
+    /** The device's real (non-VPN) default network, if known. Used by the connection test. */
+    fun directNetwork(): android.net.Network? = monitor?.defaultNetwork()
 
     override fun onCreate() {
         super.onCreate()
@@ -101,13 +120,29 @@ class TunnelService : VpnService(), PlatformInterface {
                     worker.execute { start(id) }
                 }
             }
-            ACTION_STOP -> requestStop()
+            ACTION_STOP -> if (running) requestStop() else stopForegroundAndSelf()
             else -> if (!running) stopForegroundAndSelf()
         }
         return START_NOT_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
+    override fun onBind(intent: Intent?): IBinder? {
+        // Always-on VPN: the system binds this service (instead of the user pressing connect) at boot, after a
+        // crash and after network changes. With "block connections without VPN" the device has no internet until a
+        // tunnel is up, so bringing up the last selected profile here is what makes that setting usable.
+        if (intent?.action == SERVICE_INTERFACE && !running) {
+            val id = Prefs.selectedId(this)
+            if (id != null) {
+                runCatching {
+                    androidx.core.content.ContextCompat.startForegroundService(
+                        this,
+                        Intent(this, TunnelService::class.java).setAction(ACTION_START).putExtra(EXTRA_PROFILE_ID, id),
+                    )
+                }
+            }
+        }
+        return super.onBind(intent)
+    }
 
     override fun onRevoke() {
         // The user (or another VPN app) took the VPN away.
@@ -117,12 +152,14 @@ class TunnelService : VpnService(), PlatformInterface {
 
     override fun onDestroy() {
         instance = null
+        health.shutdownNow()
         worker.shutdown()
         super.onDestroy()
     }
 
     fun requestStop(keepError: Boolean = false) {
         stopRequested = true
+        Probe.cancel() // do not wait for an in-flight internet check
         try {
             worker.execute { teardown(keepError) }
         } catch (_: java.util.concurrent.RejectedExecutionException) {
@@ -131,15 +168,30 @@ class TunnelService : VpnService(), PlatformInterface {
 
     // ---- lifecycle (worker thread) ----
 
+    private sealed interface Outcome {
+        class Up(val verdict: Verdict?, val insecure: Boolean) : Outcome
+        class Failed(val message: Int, val coreMessage: String? = null, val technical: String? = null) : Outcome
+        data object Stopped : Outcome
+    }
+
     private fun start(profileId: String) {
+        this.profileId = profileId
         TunnelState.set(ConnState.Connecting)
         EngineLog.add("start requested")
+        when (val o = bringUp(profileId)) {
+            is Outcome.Up -> onUp(o)
+            is Outcome.Failed -> fail(o.message, o.coreMessage, o.technical)
+            Outcome.Stopped -> Unit
+        }
+    }
+
+    /** Plan, engine start and the layered verification. Leaves the engine running only when it returns Up. */
+    private fun bringUp(profileId: String): Outcome {
         val plan = try {
             Core.get().launchPlan(profileId, Prefs.dnsServers(this))
         } catch (e: Exception) {
             EngineLog.add("launch plan failed")
-            fail(R.string.err_core, coreMessage = e.coreMessage())
-            return
+            return Outcome.Failed(R.string.err_core, coreMessage = e.coreMessage())
         }
         val config: String
         val insecure: Boolean
@@ -156,12 +208,9 @@ class TunnelService : VpnService(), PlatformInterface {
                 awgJson = plan.helperJson
                 awgPort = plan.socksPort.toInt()
             }
-            is FfiLaunchPlan.OpenVpn -> {
-                fail(R.string.err_unsupported_protocol)
-                return
-            }
+            is FfiLaunchPlan.OpenVpn -> return Outcome.Failed(R.string.err_unsupported_protocol)
         }
-        if (stopRequested) return
+        if (stopRequested) return Outcome.Stopped
         try {
             EngineRuntime.ensureSetup(this)
             if (awgJson != null) {
@@ -170,40 +219,66 @@ class TunnelService : VpnService(), PlatformInterface {
                 awgRunning = true
                 if (addr.substringAfterLast(':').toIntOrNull() != awgPort) error("helper listens elsewhere")
             }
-            monitor = NetworkMonitor(this).also { it.start() }
+            monitor = NetworkMonitor(this).also { m ->
+                m.onChanged = { scheduleHealthCheck(HealthMachine.AFTER_NETWORK_CHANGE_MS) }
+                m.start()
+            }
             val server = CommandServer(handler, this)
             commandServer = server
             server.start()
             server.startOrReloadService(config, OverrideOptions())
         } catch (e: Throwable) {
             EngineLog.add("engine start failed: " + (e.message ?: e.javaClass.simpleName))
-            fail(R.string.err_engine, technical = e.message)
-            return
+            return Outcome.Failed(R.string.err_engine, technical = e.message)
         } finally {
             EngineRuntime.wipeSnapshots(this)
         }
-        if (stopRequested) return
+        if (stopRequested) return Outcome.Stopped
 
         // Connected only once traffic provably flows through the tunnel (unless the user turned the check off,
         // e.g. for a config that only routes a private network).
-        var ok = !Prefs.verifyInternet(this)
-        for (attempt in 0 until 3) {
-            if (ok) break
-            if (stopRequested) return
-            if (Probe.reachable()) {
-                ok = true
-                break
+        if (!Prefs.verifyInternet(this)) {
+            EngineLog.add("verification skipped by user setting")
+            return Outcome.Up(null, insecure)
+        }
+        var verdict: Verdict = Verdict.NoInternet
+        for (attempt in 0 until 2) {
+            if (stopRequested) return Outcome.Stopped
+            val results = Probe.full(connectivity, monitor?.defaultNetwork())
+            ConnectionTest.record(results)
+            verdict = Health.verdict(results)
+            EngineLog.add("check " + results.joinToString(" ") { "${it.check.name.lowercase()}=${it.status.name.lowercase()}" })
+            if (verdict !is Verdict.NoInternet) break
+        }
+        if (stopRequested) return Outcome.Stopped
+        return when (verdict) {
+            Verdict.NoInternet -> {
+                EngineLog.add("internet check failed")
+                Outcome.Failed(R.string.err_no_internet)
             }
+            Verdict.NotThroughVpn -> {
+                EngineLog.add("traffic not passing through the tunnel")
+                Outcome.Failed(R.string.err_not_through_vpn)
+            }
+            else -> Outcome.Up(verdict, insecure)
         }
-        if (stopRequested) return
-        if (!ok) {
-            EngineLog.add("internet check failed")
-            fail(R.string.err_no_internet)
-            return
+    }
+
+    private fun onUp(o: Outcome.Up) {
+        val limits = when (val v = o.verdict) {
+            null -> listOf(Limit.UNVERIFIED)
+            is Verdict.Limited -> v.reasons
+            else -> emptyList()
         }
-        EngineLog.add("connected")
-        TunnelState.set(ConnState.Connected(SystemClock.elapsedRealtime(), insecure))
+        if (Probe.lastSameEgress && o.verdict != null && o.verdict !is Verdict.NoInternet) {
+            // Informational: the server shares the phone's public address (or traffic bypasses the tunnel unnoticed).
+            EngineLog.add("egress address same with and without vpn")
+        }
+        EngineLog.add("connected" + if (limits.isNotEmpty()) " (limited: " + limits.joinToString { it.name.lowercase() } + ")" else "")
+        healthMachine.reset()
+        TunnelState.set(ConnState.Connected(SystemClock.elapsedRealtime(), o.insecure, limits))
         showForeground(getString(R.string.notif_text))
+        if (o.verdict != null) scheduleHealthCheck(HealthMachine.INTERVAL_MS)
     }
 
     /** Failure path (worker thread): record a plain message, tear everything down, keep the error visible. */
@@ -212,9 +287,106 @@ class TunnelService : VpnService(), PlatformInterface {
         teardown(keepError = true)
     }
 
-    private fun teardown(keepError: Boolean) {
-        if (!running) return // already torn down (a failure path ran first)
-        EngineLog.add("stopping")
+    // ---- health monitoring while connected ----
+
+    private fun scheduleHealthCheck(delayMs: Long) {
+        if (!running || stopRequested) return
+        synchronized(healthLock) {
+            healthTask?.cancel(false)
+            healthTask = try {
+                health.schedule({ healthTick() }, delayMs, TimeUnit.MILLISECONDS)
+            } catch (_: java.util.concurrent.RejectedExecutionException) {
+                null
+            }
+        }
+    }
+
+    private fun healthTick() {
+        if (!running || stopRequested || TunnelState.state.value !is ConnState.Connected) return
+        val ok = Probe.light()
+        if (stopRequested) return
+        when (healthMachine.onCheck(ok)) {
+            HealthMachine.Step.HEALTHY -> scheduleHealthCheck(HealthMachine.nextDelayMs(0, screenOn()))
+            HealthMachine.Step.SUSPECT -> scheduleHealthCheck(HealthMachine.nextDelayMs(healthMachine.failures, screenOn()))
+            HealthMachine.Step.RECONNECT -> {
+                EngineLog.add("no traffic through the tunnel")
+                beginReconnect()
+            }
+        }
+    }
+
+    private fun engineAskedToStop() {
+        if (engineBusy || stopRequested || !running) return
+        when (TunnelState.state.value) {
+            is ConnState.Connected -> beginReconnect()
+            is ConnState.Reconnecting -> Unit // the reconnect loop sees start failures itself; do not kill it
+            else -> requestStop()
+        }
+    }
+
+    private fun beginReconnect() {
+        EngineLog.add("reconnecting")
+        TunnelState.set(ConnState.Reconnecting(0))
+        showForeground(getString(R.string.notif_reconnecting))
+        try {
+            worker.execute { reconnect() }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+        }
+    }
+
+    private fun screenOn(): Boolean = getSystemService(PowerManager::class.java).isInteractive
+
+    /** Restarts the engine with exponential backoff until it is verified again or the user disconnects. */
+    private fun reconnect() {
+        val id = profileId ?: return
+        var attempt = 0
+        while (running && !stopRequested) {
+            TunnelState.set(ConnState.Reconnecting(attempt))
+            reconnects++
+            teardownEngine()
+            if (!sleepUnlessStopped(Backoff.delayMs(attempt, Math.random()))) return
+            when (val o = bringUp(id)) {
+                is Outcome.Up -> {
+                    onUp(o)
+                    return
+                }
+                is Outcome.Failed -> {
+                    EngineLog.add("reconnect attempt ${attempt + 1} failed")
+                    teardownEngine()
+                    if (o.message == R.string.err_core || o.message == R.string.err_unsupported_protocol) {
+                        fail(o.message, o.coreMessage, o.technical) // retrying cannot fix these
+                        return
+                    }
+                }
+                Outcome.Stopped -> return
+            }
+            attempt++
+        }
+    }
+
+    private fun sleepUnlessStopped(ms: Long): Boolean {
+        var left = ms
+        while (left > 0) {
+            if (stopRequested) return false
+            val step = minOf(left, 250L)
+            Thread.sleep(step)
+            left -= step
+        }
+        return !stopRequested
+    }
+
+    /** Stops the engine, helper and TUN but keeps the service (and its notification) alive. */
+    private fun teardownEngine() {
+        engineBusy = true
+        try {
+            teardownEngine0()
+        } finally {
+            engineBusy = false
+        }
+    }
+
+    private fun teardownEngine0() {
+        synchronized(healthLock) { healthTask?.cancel(false) }
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
@@ -224,9 +396,16 @@ class TunnelService : VpnService(), PlatformInterface {
         }
         runCatching { tun?.close() }
         tun = null
+        monitor?.onChanged = null
         monitor?.stop()
         monitor = null
         EngineRuntime.wipeSnapshots(this)
+    }
+
+    private fun teardown(keepError: Boolean) {
+        if (!running) return // already torn down (a failure path ran first)
+        EngineLog.add("stopping")
+        teardownEngine()
         running = false
         if (!keepError) TunnelState.set(ConnState.Disconnected)
         stopForegroundAndSelf()
@@ -259,6 +438,9 @@ class TunnelService : VpnService(), PlatformInterface {
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setContentIntent(open)
@@ -271,8 +453,9 @@ class TunnelService : VpnService(), PlatformInterface {
     // ---- libbox callbacks ----
 
     private val handler = object : CommandServerHandler {
-        override fun serviceStop() = requestStop()
-        override fun serviceReload() = requestStop()
+        // libbox asks us to stop when the engine hits a fatal error. While connected that means "reconnect", not "give up".
+        override fun serviceStop() = engineAskedToStop()
+        override fun serviceReload() = engineAskedToStop()
         override fun getSystemProxyStatus(): SystemProxyStatus = SystemProxyStatus()
         override fun setSystemProxyEnabled(enabled: Boolean) {}
         override fun triggerNativeCrash() {}
@@ -305,19 +488,26 @@ class TunnelService : VpnService(), PlatformInterface {
                 val dns = options.dnsServerAddress
                 while (dns.hasNext()) b.addDnsServer(dns.next())
             }
+            var v4Routes = 0
+            var v6Routes = 0
             if (Build.VERSION.SDK_INT >= 33) {
+                // Explicit route addresses, else a default route; excluded ranges use the native excludeRoute.
                 val v4 = options.inet4RouteAddress.items()
-                if (v4.isNotEmpty()) v4.forEach { b.addRoute(IpPrefix(InetAddress.getByName(it.address()), it.prefix())) }
-                else if (options.inet4Address.hasNext()) b.addRoute("0.0.0.0", 0)
+                for (r in v4) { b.addRoute(IpPrefix(InetAddress.getByName(r.address()), r.prefix())); v4Routes++ }
                 val v6 = options.inet6RouteAddress.items()
-                if (v6.isNotEmpty()) v6.forEach { b.addRoute(IpPrefix(InetAddress.getByName(it.address()), it.prefix())) }
-                else if (options.inet6Address.hasNext()) b.addRoute("::", 0)
+                for (r in v6) { b.addRoute(IpPrefix(InetAddress.getByName(r.address()), r.prefix())); v6Routes++ }
                 options.inet4RouteExcludeAddress.items().forEach { b.excludeRoute(IpPrefix(InetAddress.getByName(it.address()), it.prefix())) }
                 options.inet6RouteExcludeAddress.items().forEach { b.excludeRoute(IpPrefix(InetAddress.getByName(it.address()), it.prefix())) }
             } else {
-                options.inet4RouteRange.items().forEach { b.addRoute(it.address(), it.prefix()) }
-                options.inet6RouteRange.items().forEach { b.addRoute(it.address(), it.prefix()) }
+                // No excludeRoute before API 33: libbox hands over ready-made ranges (0.0.0.0/0 and ::/0 minus the excluded
+                // prefixes, or the explicit route addresses) in inet4RouteRange / inet6RouteRange.
+                for (r in options.inet4RouteRange.items()) { b.addRoute(r.address(), r.prefix()); v4Routes++ }
+                for (r in options.inet6RouteRange.items()) { b.addRoute(r.address(), r.prefix()); v6Routes++ }
             }
+            // Whatever the API level, an interface with an address but no route would carry nothing while the app
+            // shows "connected". Fall back to a default route per address family.
+            if (v4Routes == 0 && options.inet4Address.items().isNotEmpty()) b.addRoute("0.0.0.0", 0)
+            if (v6Routes == 0 && options.inet6Address.items().isNotEmpty()) b.addRoute("::", 0)
             val include = options.includePackage
             while (include.hasNext()) runCatching { b.addAllowedApplication(include.next()) }
             val exclude = options.excludePackage

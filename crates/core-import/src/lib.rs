@@ -7,6 +7,7 @@ mod formats;
 mod openvpn;
 mod qr;
 mod uri;
+mod validate;
 mod wireguard;
 
 pub use analyze::{analyze, Analysis, Issue};
@@ -30,7 +31,7 @@ pub fn detect(input: &str) -> Result<Profile, ConfigIssue> {
     if wireguard::looks_like(text) {
         return wireguard::parse(text);
     }
-    if looks_like_openvpn(text) {
+    if openvpn::looks_like(text) {
         return openvpn::parse(text);
     }
     if let Some((scheme, _)) = text.split_once("://") {
@@ -59,11 +60,6 @@ pub fn detect_many(input: &str) -> Result<Vec<Result<Profile, ConfigIssue>>, Con
         .take(MAX_PROFILES)
         .map(detect)
         .collect())
-}
-
-fn looks_like_openvpn(text: &str) -> bool {
-    let has = |key: &str| text.lines().any(|l| l.trim_start().starts_with(key));
-    has("remote ") && (has("client") || has("dev ") || has("<ca>"))
 }
 
 #[cfg(test)]

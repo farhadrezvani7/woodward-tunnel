@@ -2,7 +2,20 @@
 # Real OpenVPN end-to-end test in Docker: generates a PKI, runs an OpenVPN server container that
 # forwards into a network only it can reach, then imports a real .ovpn through the app's importer,
 # starts it through the runner and proves traffic crosses the VPN.
+#
+# MINIMUM OPENVPN: 2.7.8. Every older 2.7.x release is affected by published security advisories
+# (https://community.openvpn.net/Security%20Announcements), among them CVE-2026-84790 (remote
+# certificate identity bypass via an embedded NUL byte, fixed in 2.7.8) and CVE-2026-88964
+# (underflow on a malicious PUSH_UPDATE, fixed in 2.7.8). Both containers verify the version they
+# installed and the test fails when the distribution ships an older openvpn; it never silently
+# tests against a vulnerable build.
 set -euo pipefail
+export MIN_OPENVPN="2.7.8"
+# Shell snippet evaluated inside each container after "dnf install openvpn": exits 1 when too old.
+export CHECK_OVPN='v=$(openvpn --version | head -n1 | sed -E "s/^OpenVPN ([0-9]+\.[0-9]+\.[0-9]+).*/\1/")
+if [ "$(printf "%s\n%s\n" "$MIN_OPENVPN" "$v" | sort -V | head -n1)" != "$MIN_OPENVPN" ]; then
+  echo "FATAL: openvpn $v is older than the required minimum $MIN_OPENVPN" >&2; exit 1; fi
+echo "openvpn $v (>= $MIN_OPENVPN)"'
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 cargo build -q -p core-engine --example ovpn_e2e
@@ -67,15 +80,16 @@ cd "$root"
 
 docker network create --subnet 172.31.9.0/24 $NET >/dev/null
 docker network create --subnet 172.31.10.0/24 --internal $NET2 >/dev/null
-docker create --name wt-ovpn-server --network $NET --ip 172.31.9.10 --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 \
-  -v "$W":/pki:ro $IMG bash -c 'dnf -y -q install openvpn iptables-nft >/dev/null 2>&1; iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j MASQUERADE; exec openvpn --config /pki/server.conf' >/dev/null
+docker create --name wt-ovpn-server --network $NET --ip 172.31.9.10 --cap-add NET_ADMIN --device /dev/net/tun --sysctl net.ipv4.ip_forward=1 -e MIN_OPENVPN -e CHECK_OVPN \
+  -v "$W":/pki:ro $IMG bash -c 'dnf -y -q install openvpn iptables-nft >/dev/null 2>&1; eval "$CHECK_OVPN" || exit 1; iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j MASQUERADE; exec openvpn --config /pki/server.conf' >/dev/null
 docker network connect --ip 172.31.10.10 $NET2 wt-ovpn-server
 docker start wt-ovpn-server >/dev/null
 docker run -d --name wt-ovpn-web --network $NET2 --ip 172.31.10.20 -v "$W/nginx.conf":/etc/nginx/conf.d/default.conf:ro nginx:alpine >/dev/null
 # wait for the server to finish installing and start listening
 for i in $(seq 1 60); do docker logs wt-ovpn-server 2>&1 | grep -q "Initialization Sequence Completed" && break; sleep 2; done
 docker logs wt-ovpn-server 2>&1 | tail -3
-docker run --rm --network $NET --ip 172.31.9.30 --cap-add NET_ADMIN --device /dev/net/tun \
+docker run --rm --network $NET --ip 172.31.9.30 --cap-add NET_ADMIN --device /dev/net/tun -e MIN_OPENVPN -e CHECK_OVPN \
   -v "$EX":/usr/bin/ovpn_e2e:ro -v "$W/client.ovpn":/client.ovpn:ro $IMG bash -c '
 dnf -y -q install openvpn iproute >/dev/null 2>&1
+eval "$CHECK_OVPN" || exit 1
 ovpn_e2e /client.ovpn 172.31.10.20:8080'

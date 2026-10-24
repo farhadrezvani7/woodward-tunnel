@@ -13,10 +13,17 @@
   <header class="top">
     <h1 class="brand" data-i18n="appName">ووردوارد تانل</h1>
     <div class="top-actions">
-      <button type="button" id="lang-btn" class="chip" aria-label="Language / زبان">English</button>
-      <button type="button" id="adv-btn" class="chip" data-i18n="advanced">تنظیمات تخصصی</button>
+      <button type="button" id="lang-btn" class="chip" lang="en">English</button>
+      <button type="button" id="adv-btn" class="chip" data-i18n="settings">تنظیمات</button>
     </div>
   </header>
+
+  <p id="banner" class="banner" role="note" hidden></p>
+
+  <div id="ks" class="banner ks" role="alert" hidden>
+    <span id="ks-text"></span>
+    <button type="button" id="ks-btn" class="btn" data-i18n="ksAllow">اجازهٔ اتصال مستقیم</button>
+  </div>
 
   <main>
     <section class="hero" aria-labelledby="state-title">
@@ -24,9 +31,11 @@
         <span class="power-icon" id="power-icon" aria-hidden="true"></span>
         <span class="power-label" id="power-label">اتصال</span>
       </button>
-      <p id="state-title" class="state-title" role="status" aria-live="polite">قطع است</p>
+      <p id="state-title" class="state-title">قطع است</p>
       <p id="timer" class="timer" hidden><bdi dir="ltr" id="timer-text">00:00:00</bdi></p>
-      <p id="state-detail" class="state-detail" aria-live="polite"></p>
+      <p id="state-detail" class="state-detail"></p>
+      <button type="button" id="fix-btn" class="btn" hidden data-i18n="fixPermBtn">تنظیم دسترسی</button>
+      <p id="mode-note" class="note" hidden></p>
       <p id="insecure" class="note warn" hidden></p>
     </section>
 
@@ -38,13 +47,20 @@
           <button type="button" id="add-paste" class="btn" data-i18n="addPaste">چسباندن</button>
         </div>
       </div>
+      <div id="filter-wrap" class="filter-wrap" hidden>
+        <label for="filter" class="sr-only" data-i18n="filterLabel">جستجو در سرورها</label>
+        <input id="filter" type="search" class="filter" autocomplete="off" spellcheck="false" data-i18n-ph="filterPh" placeholder="جستجوی سرور…">
+        <p id="count" class="count" role="status" aria-live="polite"></p>
+      </div>
       <p id="empty" class="empty" hidden></p>
       <ul id="list" class="list"></ul>
+      <button type="button" id="more" class="btn more" hidden data-i18n="showMore">نمایش بیشتر</button>
       <p class="hint" data-i18n="dropHint">می‌توانید فایل کانفیگ یا تصویر QR را اینجا رها کنید.</p>
     </section>
   </main>
 
-  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <div id="toasts" class="toasts"></div>
+  <div id="sr-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
   <div id="drop" class="drop" hidden aria-hidden="true"><p data-i18n="dropNow">برای افزودن، فایل را رها کنید</p></div>
 
   <!-- paste fallback -->
@@ -52,7 +68,8 @@
     <form method="dialog" class="dlg">
       <h2 id="paste-h" data-i18n="pasteTitle">چسباندن کانفیگ یا لینک</h2>
       <p class="muted" data-i18n="pasteHelp">متن را اینجا بچسبانید (Ctrl+V).</p>
-      <textarea id="paste-text" rows="6" spellcheck="false" autocomplete="off" dir="ltr"></textarea>
+      <textarea id="paste-text" rows="6" spellcheck="false" autocomplete="off" dir="ltr" aria-labelledby="paste-h"></textarea>
+      <p class="dlg-error" role="alert" hidden></p>
       <div class="dlg-actions">
         <button type="button" class="btn primary" id="paste-ok" data-i18n="add">افزودن</button>
         <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
@@ -65,10 +82,12 @@
     <form method="dialog" class="dlg">
       <h2 id="sub-h" data-i18n="subTitle">دریافت از لینک اشتراک؟</h2>
       <p id="sub-text" class="muted"></p>
+      <p class="sub-host" dir="ltr" id="sub-host"></p>
       <p class="url" dir="ltr" id="sub-url"></p>
+      <p class="dlg-error" role="alert" hidden></p>
       <div class="dlg-actions">
+        <button type="button" class="btn" id="sub-no" data-close autofocus data-i18n="subNo">نه</button>
         <button type="button" class="btn primary" id="sub-ok" data-i18n="subYes">بله، دریافت کن</button>
-        <button type="button" class="btn" data-close data-i18n="subNo">نه</button>
       </div>
     </form>
   </dialog>
@@ -78,9 +97,10 @@
     <form method="dialog" class="dlg">
       <h2 id="edit-h" data-i18n="editTitle">ویرایش سرور</h2>
       <label for="edit-name" data-i18n="name">نام</label>
-      <input id="edit-name" type="text" maxlength="80" autocomplete="off">
+      <input id="edit-name" type="text" maxlength="80" autocomplete="off" dir="auto">
       <label for="edit-group" data-i18n="group">گروه (اختیاری)</label>
-      <input id="edit-group" type="text" maxlength="60" autocomplete="off">
+      <input id="edit-group" type="text" maxlength="60" autocomplete="off" dir="auto">
+      <p class="dlg-error" role="alert" hidden></p>
       <div class="dlg-actions">
         <button type="button" class="btn primary" id="edit-ok" data-i18n="save">ذخیره</button>
         <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
@@ -94,9 +114,22 @@
     <form method="dialog" class="dlg">
       <h2 id="del-h" data-i18n="delTitle">این سرور حذف شود؟</h2>
       <p id="del-text" class="muted"></p>
+      <p class="dlg-error" role="alert" hidden></p>
       <div class="dlg-actions">
+        <button type="button" class="btn" data-close autofocus data-i18n="cancel">انصراف</button>
         <button type="button" class="btn danger" id="del-ok" data-i18n="delete">حذف</button>
-        <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- import problems -->
+  <dialog id="dlg-problems" aria-labelledby="problems-h">
+    <form method="dialog" class="dlg wide">
+      <h2 id="problems-h" data-i18n="problemsTitle">موارد اضافه‌نشده</h2>
+      <p id="problems-intro" class="muted"></p>
+      <ul id="problems-list" class="problems"></ul>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" data-close autofocus data-i18n="close">بستن</button>
       </div>
     </form>
   </dialog>
@@ -107,7 +140,7 @@
       <h2 id="priv-h" data-i18n="privTitle">اجازهٔ مدیر سیستم لازم است</h2>
       <p class="muted" data-i18n="privText">برای ساخت VPN روی کل سیستم، یک بار باید رمز سیستم را وارد کنید. سیستم‌عامل خودش این پنجره را نشان می‌دهد.</p>
       <div class="dlg-actions">
-        <button type="button" class="btn primary" id="priv-ok" data-i18n="privYes">ادامه</button>
+        <button type="button" class="btn primary" id="priv-ok" autofocus data-i18n="privYes">ادامه</button>
         <button type="button" class="btn" data-close data-i18n="cancel">انصراف</button>
       </div>
     </form>
@@ -119,6 +152,8 @@
       <h2 id="diag-h" data-i18n="diag">گزارش عیب‌یابی</h2>
       <p class="muted" data-i18n="diagHelp">این گزارش فقط روی همین دستگاه ساخته شده و جایی فرستاده نمی‌شود. آن را بخوانید؛ اگر خواستید کپی کنید و خودتان برای پشتیبانی بفرستید.</p>
       <textarea id="diag-text" rows="12" readonly spellcheck="false" dir="ltr" aria-labelledby="diag-h"></textarea>
+      <p class="dlg-error" role="alert" hidden></p>
+      <p id="diag-ok" class="dlg-ok" role="status" hidden></p>
       <div class="dlg-actions">
         <button type="button" class="btn primary" id="diag-copy" data-i18n="copy">کپی</button>
         <button type="button" class="btn" data-close data-i18n="close">بستن</button>
@@ -126,32 +161,68 @@
     </form>
   </dialog>
 
-  <!-- advanced -->
+  <!-- about / licenses -->
+  <dialog id="dlg-about" aria-labelledby="about-h">
+    <form method="dialog" class="dlg wide">
+      <h2 id="about-h" data-i18n="about">درباره</h2>
+      <p id="about-text" class="muted"></p>
+      <h3 data-i18n="licensesTitle">مجوزهای نرم‌افزارهای استفاده‌شده</h3>
+      <textarea id="about-licenses" rows="12" readonly spellcheck="false" dir="ltr" aria-labelledby="about-h"></textarea>
+      <div class="dlg-actions">
+        <button type="button" class="btn primary" data-close autofocus data-i18n="close">بستن</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- settings -->
   <dialog id="dlg-adv" aria-labelledby="adv-h">
     <form method="dialog" class="dlg wide">
-      <h2 id="adv-h" data-i18n="advanced">تنظیمات تخصصی</h2>
+      <h2 id="adv-h" data-i18n="settings">تنظیمات</h2>
       <p class="muted" data-i18n="advHelp">این بخش فقط برای کاربران حرفه‌ای است. تنظیمات پیش‌فرض برای بیشتر افراد مناسب است.</p>
+      <p id="adv-warn" class="note warn" hidden data-i18n="advWarn">با تغییر نوع اتصال، درگاه یا DNS، اتصال فعلی قطع می‌شود.</p>
 
       <fieldset>
         <legend data-i18n="modeLegend">نوع اتصال</legend>
         <label class="radio"><input type="radio" name="mode" value="tun"> <span data-i18n="modeTun">کل سیستم (توصیه می‌شود)</span></label>
-        <label class="radio"><input type="radio" name="mode" value="proxy"> <span data-i18n="modeProxy">فقط پروکسی محلی (بدون نیاز به دسترسی مدیر)</span></label>
+        <label class="radio"><input type="radio" name="mode" value="proxy"> <span data-i18n="modeProxy">فقط پروکسی محلی</span></label>
       </fieldset>
 
       <label for="adv-port" data-i18n="port">درگاه SOCKS محلی</label>
-      <input id="adv-port" type="number" min="1024" max="65535" dir="ltr" inputmode="numeric">
+      <input id="adv-port" type="number" min="1024" max="65535" step="1" dir="ltr" inputmode="numeric">
 
       <label for="adv-dns" data-i18n="dns">سرورهای DNS (با ویرگول جدا کنید)</label>
       <input id="adv-dns" type="text" dir="ltr" placeholder="1.1.1.1, 8.8.8.8" autocomplete="off">
 
-      <label class="check"><input type="checkbox" id="adv-details"> <span data-i18n="showDetails">نمایش نشانی سرورها در فهرست</span></label>
+      <fieldset>
+        <legend data-i18n="behaviourLegend">رفتار برنامه</legend>
+        <label class="check"><input type="checkbox" id="adv-leak"> <span data-i18n="leakProtection">محافظ نشت: تا وقتی VPN وصل نیست، اینترنت بسته بماند (توصیه می‌شود)</span></label>
+        <label class="check"><input type="checkbox" id="adv-launch"> <span data-i18n="connectOnLaunch">هنگام باز شدن برنامه، خودکار وصل شو</span></label>
+        <label class="check"><input type="checkbox" id="adv-minimized"> <span data-i18n="startMinimized">برنامه کوچک‌شده در نوار سیستم باز شود</span></label>
+        <label class="check"><input type="checkbox" id="adv-tray"> <span data-i18n="closeToTray">با بستن پنجره در حالت وصل، برنامه در نوار سیستم بماند</span></label>
+        <label class="check"><input type="checkbox" id="adv-details"> <span data-i18n="showDetails">نمایش نشانی سرورها در فهرست</span></label>
+      </fieldset>
+
+      <fieldset>
+        <legend data-i18n="appearanceLegend">ظاهر</legend>
+        <label class="radio"><input type="radio" name="theme" value="auto"> <span data-i18n="themeAuto">مثل سیستم</span></label>
+        <label class="radio"><input type="radio" name="theme" value="light"> <span data-i18n="themeLight">روشن</span></label>
+        <label class="radio"><input type="radio" name="theme" value="dark"> <span data-i18n="themeDark">تیره</span></label>
+        <div class="zoom-row">
+          <span id="zoom-label" data-i18n="textSize">اندازهٔ متن</span>
+          <button type="button" class="btn" id="zoom-out" data-i18n-aria="smaller" aria-label="کوچک‌تر">A−</button>
+          <output id="zoom-val" for="zoom-out zoom-in" dir="ltr">100%</output>
+          <button type="button" class="btn" id="zoom-in" data-i18n-aria="larger" aria-label="بزرگ‌تر">A+</button>
+        </div>
+      </fieldset>
 
       <h3 data-i18n="systemInfo">اطلاعات سیستم</h3>
       <dl id="adv-info" class="info" dir="ltr"></dl>
+      <p class="dlg-error" role="alert" hidden></p>
       <div class="dlg-actions">
         <button type="button" class="btn primary" id="adv-save" data-i18n="save">ذخیره</button>
         <button type="button" class="btn" data-close data-i18n="close">بستن</button>
         <button type="button" class="btn" id="adv-diag" data-i18n="diag">گزارش عیب‌یابی</button>
+        <button type="button" class="btn" id="adv-about" data-i18n="about">درباره</button>
         <button type="button" class="btn" id="adv-grant" data-i18n="fixPerm" hidden>تنظیم دسترسی</button>
       </div>
     </form>

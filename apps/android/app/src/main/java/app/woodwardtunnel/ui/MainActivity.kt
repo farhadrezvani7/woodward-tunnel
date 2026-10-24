@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
+import app.woodwardtunnel.BuildConfig
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,6 +17,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +40,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -66,8 +73,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Configs, names and the diagnostic report are on screen: keep them out of screenshots, screen
+        // recording and the recents thumbnail (debug builds stay capturable for development).
+        if (!BuildConfig.DEBUG) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
-        handleIncoming(intent)
+        // A recreated activity (rotation, process death) gets the original launch intent again: do not re-offer it.
+        if (savedInstanceState == null) handleIncoming(intent)
         setContent { WtTheme { Root() } }
     }
 
@@ -80,12 +91,16 @@ class MainActivity : ComponentActivity() {
     /** Links and shared text are never imported silently: the user confirms first. */
     private fun handleIncoming(intent: Intent?) {
         intent ?: return
-        val text = when (intent.action) {
-            Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme != "content" && it.scheme != "file" }?.toString()
-            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
-            else -> null
+        // Another app controls every field of this intent: a malformed extra must not crash the app.
+        val text = try {
+            Incoming.extract(
+                intent.action, intent.data?.scheme, intent.data?.toString(),
+                if (intent.action == Intent.ACTION_SEND) intent.getCharSequenceExtra(Intent.EXTRA_TEXT) else null,
+            )
+        } catch (e: Exception) {
+            null
         }
-        if (!text.isNullOrBlank() && text.length <= MAX_TEXT) vm.offerExternal(ExternalImport.Text(text))
+        if (text != null) vm.offerExternal(ExternalImport.Text(text))
         // Consume so a rotation does not offer the same import again.
         if (intent.action == Intent.ACTION_VIEW || intent.action == Intent.ACTION_SEND) {
             intent.action = Intent.ACTION_MAIN
@@ -134,14 +149,19 @@ class MainActivity : ComponentActivity() {
         val subscription by vm.pendingSubscription.collectAsStateWithLifecycle()
         val ctx = LocalContext.current
 
-        var showSettings by remember { mutableStateOf(false) }
-        var showAdd by remember { mutableStateOf(false) }
-        var renaming by remember { mutableStateOf<FfiProfile?>(null) }
-        var grouping by remember { mutableStateOf<FfiProfile?>(null) }
-        var deleting by remember { mutableStateOf<FfiProfile?>(null) }
+        // Saveable so rotation or process recreation does not bounce the user back to the main screen.
+        var showSettings by rememberSaveable { mutableStateOf(false) }
+        var showAdd by rememberSaveable { mutableStateOf(false) }
+        var renamingId by rememberSaveable { mutableStateOf<String?>(null) }
+        var groupingId by rememberSaveable { mutableStateOf<String?>(null) }
+        var deletingId by rememberSaveable { mutableStateOf<String?>(null) }
+        val renaming = profiles.firstOrNull { it.id == renamingId }
+        val grouping = profiles.firstOrNull { it.id == groupingId }
+        val deleting = profiles.firstOrNull { it.id == deletingId }
         val snackbar = remember { SnackbarHostState() }
 
         LaunchedEffect(Unit) { vm.vpnConsent.collect { vpnConsent.launch(it) } }
+        LaunchedEffect(state) { if (state is app.woodwardtunnel.vpn.ConnState.Disconnected) vm.onDisconnected() }
         LaunchedEffect(Unit) {
             vm.messages.collect { m ->
                 snackbar.showSnackbar(ctx.getString(m.res, *m.args.toTypedArray()))
@@ -165,24 +185,26 @@ class MainActivity : ComponentActivity() {
                 containerColor = MaterialTheme.colorScheme.background,
                 snackbarHost = { SnackbarHost(snackbar, Modifier.navigationBarsPadding()) },
             ) { pad ->
-                Column(Modifier.fillMaxSize().padding(pad)) {
+                Column(Modifier.fillMaxSize().padding(pad), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                     if (showSettings) {
                         SettingsScreen(
                             onBack = { showSettings = false },
                             onSubscription = { vm.requestSubscription(it) },
                             onMessage = { vm.postMessage(it) },
+                            activeProtocol = profiles.firstOrNull { it.id == selected }?.protocolName,
                         )
                     } else {
                         HomeScreen(
                             state = state, profiles = profiles, selectedId = selected, coreOk = coreOk,
                             onConnect = { if (state is app.woodwardtunnel.vpn.ConnState.Connected ||
-                                state is app.woodwardtunnel.vpn.ConnState.Connecting) vm.onConnectButton() else connect() },
-                            onSelect = { vm.select(it) },
+                                state is app.woodwardtunnel.vpn.ConnState.Connecting ||
+                                state is app.woodwardtunnel.vpn.ConnState.Reconnecting) vm.onConnectButton() else connect() },
+                            onSelect = { vm.choose(it) },
                             onAdd = { showAdd = true },
                             onSettings = { showSettings = true },
-                            onRename = { renaming = it },
-                            onGroup = { grouping = it },
-                            onDelete = { deleting = it },
+                            onRename = { renamingId = it.id },
+                            onGroup = { groupingId = it.id },
+                            onDelete = { deletingId = it.id },
                         )
                     }
                 }
@@ -220,23 +242,26 @@ class MainActivity : ComponentActivity() {
         }
 
         renaming?.let { p ->
-            TextPrompt(R.string.action_rename, R.string.label_name, p.name,
-                onDismiss = { renaming = null },
-                onSave = { vm.rename(p.id, it); renaming = null })
+            TextPrompt(R.string.action_rename, R.string.label_name, DisplayText.clean(p.name),
+                onDismiss = { renamingId = null },
+                onSave = { vm.rename(p.id, it); renamingId = null })
         }
         grouping?.let { p ->
             TextPrompt(R.string.action_group, R.string.label_group, p.group,
-                onDismiss = { grouping = null },
-                onSave = { vm.setGroup(p.id, it); grouping = null })
+                onDismiss = { groupingId = null },
+                onSave = { vm.setGroup(p.id, it); groupingId = null })
         }
         deleting?.let { p ->
             AlertDialog(
-                onDismissRequest = { deleting = null },
-                text = { Text(stringResource(R.string.delete_confirm, p.name)) },
-                confirmButton = {
-                    TextButton(onClick = { vm.delete(p.id); deleting = null }) { Text(stringResource(R.string.action_delete)) }
+                onDismissRequest = { deletingId = null },
+                text = {
+                    ObscuredGuard()
+                    Text(stringResource(R.string.delete_confirm, DisplayText.isolated(p.name)))
                 },
-                dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.action_cancel)) } },
+                confirmButton = {
+                    TextButton(onClick = { vm.delete(p.id); deletingId = null }) { Text(stringResource(R.string.action_delete)) }
+                },
+                dismissButton = { TextButton(onClick = { deletingId = null }) { Text(stringResource(R.string.action_cancel)) } },
             )
         }
         summary?.let { s ->
@@ -244,22 +269,41 @@ class MainActivity : ComponentActivity() {
                 onDismissRequest = { vm.dismissSummary() },
                 title = { Text(stringResource(R.string.import_problems_title)) },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    ) {
                         if (s.added > 0) Text(stringResource(R.string.import_added, s.added))
                         if (s.duplicates > 0) Text(stringResource(R.string.import_duplicates, s.duplicates))
-                        s.problems.take(5).forEach { msg ->
-                            Text(msg, style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.import_problems_count, s.problems.size), fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                        s.problems.take(MAX_PROBLEMS_SHOWN).forEach { msg ->
+                            Text(DisplayText.clean(msg, 300), style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (s.problems.size > MAX_PROBLEMS_SHOWN) {
+                            Text(stringResource(R.string.import_problems_more, s.problems.size - MAX_PROBLEMS_SHOWN), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 },
                 confirmButton = { TextButton(onClick = { vm.dismissSummary() }) { Text(stringResource(R.string.action_ok)) } },
             )
         }
-        external?.let {
+        external?.let { ext ->
+            val preview = remember(ext) { (ext as? ExternalImport.Text)?.let { Incoming.preview(it.text) } }
             AlertDialog(
                 onDismissRequest = { vm.declineExternal() },
                 title = { Text(stringResource(R.string.external_import_title)) },
-                text = { Text(stringResource(R.string.external_import_body)) },
+                text = {
+                    ObscuredGuard()
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.external_import_body))
+                        if (preview != null && preview.links > 0) {
+                            Text(
+                                stringResource(R.string.external_import_preview, preview.links, preview.schemes.joinToString(", ")),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                },
                 confirmButton = { TextButton(onClick = { vm.confirmExternal() }) { Text(stringResource(R.string.action_add)) } },
                 dismissButton = { TextButton(onClick = { vm.declineExternal() }) { Text(stringResource(R.string.action_cancel)) } },
             )
@@ -268,7 +312,10 @@ class MainActivity : ComponentActivity() {
             AlertDialog(
                 onDismissRequest = { vm.declineSubscription() },
                 title = { Text(stringResource(R.string.subscription_title)) },
-                text = { Text(stringResource(R.string.subscription_body, MainViewModel.hostOf(url))) },
+                text = {
+                    ObscuredGuard()
+                    Text(stringResource(R.string.subscription_body, MainViewModel.hostOf(url)))
+                },
                 confirmButton = { TextButton(onClick = { vm.confirmSubscription() }) { Text(stringResource(R.string.subscription_download)) } },
                 dismissButton = { TextButton(onClick = { vm.declineSubscription() }) { Text(stringResource(R.string.action_cancel)) } },
             )
@@ -276,8 +323,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun importUri(uri: Uri) {
-        val bytes = readUri(uri)
-        if (bytes == null) vm.postMessage(R.string.import_read_failed) else vm.importBytes(bytes)
+        // Reading (up to 8 MB) must not block the main thread.
+        vm.viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val bytes = readUri(uri)
+            if (bytes == null) vm.postMessage(R.string.import_read_failed) else vm.importBytes(bytes)
+        }
     }
 
     @Composable
@@ -287,7 +337,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun TextPrompt(title: Int, label: Int, initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-        var text by remember { mutableStateOf(initial) }
+        var text by rememberSaveable { mutableStateOf(initial) }
         AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text(stringResource(title)) },
@@ -303,7 +353,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
-        const val MAX_TEXT = 200_000
+        const val MAX_TEXT = Incoming.MAX_TEXT
+        const val MAX_PROBLEMS_SHOWN = 30
         const val MAX_FILE = 8 * 1024 * 1024
     }
+}
+
+/** Drops touches that arrive while another app draws over this dialog (tapjacking). */
+@Composable
+fun ObscuredGuard() {
+    val v = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect { v.rootView.filterTouchesWhenObscured = true }
 }

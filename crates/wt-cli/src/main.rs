@@ -1,7 +1,9 @@
 //! `wt`: command-line front end. Same engine and store as the desktop and mobile apps.
 
 use clap::{Parser, Subcommand};
-use core_app::{App, Controller, ControllerConfig, HttpFetcher, UiState};
+use core_app::{
+    App, Controller, ControllerConfig, ControllerOptions, HttpFetcher, ProbeMode, UiState,
+};
 use core_engine::runner::Binaries;
 use core_engine::Mode;
 use core_keyring::KeyringStore;
@@ -59,11 +61,18 @@ enum Cmd {
         /// DNS server reached through the tunnel (repeatable)
         #[arg(long)]
         dns: Vec<String>,
-        /// TCP endpoint used to prove the tunnel carries traffic
-        #[arg(long, default_value = "1.1.1.1:443")]
-        probe: SocketAddr,
+        /// Prove the tunnel with a TCP connect to this endpoint instead of the default DNS query
+        /// answered through the VPN server. The endpoint sees the connection, so pick one you trust.
+        #[arg(long)]
+        probe: Option<SocketAddr>,
+        /// Do not block traffic outside the tunnel when the tunnel drops
+        #[arg(long)]
+        no_killswitch: bool,
+        /// Keep the local network reachable while leak protection is on
+        #[arg(long)]
+        lan: bool,
     },
-    /// Leak-protection rules (Linux nftables)
+    /// Leak-protection rules (Linux nftables, macOS pf, Windows firewall)
     Killswitch {
         #[command(subcommand)]
         action: KsCmd,
@@ -94,6 +103,8 @@ enum KsCmd {
         lan: bool,
     },
     Off,
+    /// Say whether the leak-protection rules are loaded (also after a crash of the app)
+    Status,
 }
 
 fn data_dir(cli: &Cli) -> PathBuf {
@@ -180,7 +191,7 @@ async fn main() {
 
 async fn run(cli: Cli) -> Result<(), String> {
     match &cli.cmd {
-        Cmd::Killswitch { action } => return killswitch(action),
+        Cmd::Killswitch { action } => return killswitch(&cli, action),
         Cmd::Doctor => return doctor(&cli),
         _ => {}
     }
@@ -239,6 +250,8 @@ async fn run(cli: Cli) -> Result<(), String> {
             proxy,
             dns,
             probe,
+            no_killswitch,
+            lan,
         } => {
             let id = resolve(&app, &target)?;
             let mode = proxy
@@ -248,11 +261,19 @@ async fn run(cli: Cli) -> Result<(), String> {
                 mode: mode.clone(),
                 dns,
                 bins: Binaries::discover(),
-                probe,
+                probe: probe.unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 9))),
                 ready_timeout: Duration::from_secs(15),
                 work_dir: dir.join("run"),
             };
-            let c = Controller::spawn(app, cfg);
+            let mut opts = ControllerOptions::recommended(&cfg);
+            if probe.is_some() {
+                opts.probe_mode = ProbeMode::Tcp;
+            }
+            if no_killswitch {
+                opts.kill_switch.enabled = false;
+            }
+            opts.kill_switch.allow_lan = lan;
+            let c = Controller::spawn_with(app, cfg, opts);
             let mut rx = c.status();
             c.connect(&id);
             let mut last = UiState::Idle;
@@ -291,25 +312,36 @@ async fn run(cli: Cli) -> Result<(), String> {
 }
 
 fn ks(iface: &str, server: &[IpAddr], lan: bool) -> core_policy::KillSwitch {
-    core_policy::KillSwitch {
-        tun_iface: iface.into(),
-        server_ips: server.to_vec(),
-        allow_lan: lan,
-    }
+    let mut k = core_policy::KillSwitch::new(iface, server.to_vec());
+    k.allow_lan = lan;
+    k
 }
 
-fn killswitch(a: &KsCmd) -> Result<(), String> {
+fn firewall(cli: &Cli) -> Result<core_policy::Firewall, String> {
+    core_policy::Firewall::system(data_dir(cli).join("run").join("killswitch"), vec![])
+        .map_err(|e| e.to_string())
+}
+
+fn killswitch(cli: &Cli, a: &KsCmd) -> Result<(), String> {
     match a {
         KsCmd::Print { iface, server, lan } => {
-            print!("{}", ks(iface, server, *lan).nftables().map_err(|e| e.to_string())?);
+            print!(
+                "{}",
+                ks(iface, server, *lan)
+                    .nftables()
+                    .map_err(|e| e.to_string())?
+            );
             Ok(())
         }
-        #[cfg(target_os = "linux")]
-        KsCmd::On { iface, server, lan } => ks(iface, server, *lan).apply().map_err(|e| e.to_string()),
-        #[cfg(target_os = "linux")]
-        KsCmd::Off => core_policy::KillSwitch::remove().map_err(|e| e.to_string()),
-        #[cfg(not(target_os = "linux"))]
-        _ => Err("applying rules from the CLI is only implemented on Linux; the desktop app applies the OS-specific rules".into()),
+        KsCmd::On { iface, server, lan } => firewall(cli)?
+            .apply(&ks(iface, server, *lan))
+            .map_err(|e| e.to_string()),
+        KsCmd::Off => firewall(cli)?.remove().map_err(|e| e.to_string()),
+        KsCmd::Status => {
+            let active = firewall(cli)?.is_active().map_err(|e| e.to_string())?;
+            println!("{}", if active { "active" } else { "inactive" });
+            Ok(())
+        }
     }
 }
 
