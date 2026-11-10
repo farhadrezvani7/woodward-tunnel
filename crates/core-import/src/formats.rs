@@ -797,6 +797,17 @@ pub fn amnezia(link: &str, out: &mut Analysis, depth: u8) -> Result<(), ConfigIs
         .take((crate::MAX_INPUT_BYTES * 4) as u64)
         .read_to_string(&mut json)
         .map_err(|_| bad("Amnezia", "link"))?;
+    // Some providers put a plain WireGuard/AmneziaWG config (often with a leading `#` comment) in the link
+    // instead of the JSON envelope; the Amnezia app accepts both.
+    if !json.trim_start().starts_with('{') {
+        let before = out.profiles_len();
+        analyze_inner(&json, out, depth + 1);
+        return if out.profiles_len() > before {
+            Ok(())
+        } else {
+            Err(bad("Amnezia", "link"))
+        };
+    }
     let v: Value = serde_json::from_str(&json).map_err(|_| bad("Amnezia", "link"))?;
     let containers = v
         .get("containers")
@@ -934,6 +945,23 @@ mod tests {
             r#"{"server":"s.example.com","server_port":8388,"password":"pw1234","method":"chacha20-ietf-poly1305"}"#,
         );
         assert_eq!(a.profiles.len(), 1);
+    }
+
+    #[test]
+    fn amnezia_link_with_plain_config_text() {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use std::io::Write;
+        let k = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        let conf = format!("#Provider note\n[Interface]\nPrivateKey = {k}\nAddress = 10.77.0.157/32\nDNS = 1.1.1.1\nMTU = 1360\nJc = 4\nJmin = 40\nJmax = 70\nS1 = 44\nS2 = 87\nH1 = 1479265368\nH2 = 934124586\nH3 = 394225477\nH4 = 2147310334\n[Peer]\nPublicKey = {k}\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = vpn.example.com:51821\nPersistentKeepalive = 6\n");
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(conf.as_bytes()).unwrap();
+        let mut raw = (conf.len() as u32).to_be_bytes().to_vec();
+        raw.extend(z.finish().unwrap());
+        let a = analyze(&format!("vpn://{}", URL_SAFE_NO_PAD.encode(raw)));
+        assert!(a.issues.is_empty(), "{:?}", a.issues);
+        assert_eq!(a.profiles.len(), 1);
+        assert_eq!(a.profiles[0].protocol, core_model::Protocol::AmneziaWg);
+        assert_eq!(a.profiles[0].host, "vpn.example.com");
     }
 
     #[test]
