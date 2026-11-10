@@ -448,6 +448,24 @@ fn remote_dns_server(spec: Option<&str>) -> Value {
     }
 }
 
+/// Which address families application lookups get back.
+///
+/// Most proxy servers have no IPv6 egress. With `prefer_ipv4` the system still receives AAAA records and,
+/// because the tunnel interface has an IPv6 address, many apps try IPv6 first and then hang or time out
+/// (seen on a real phone: the connectivity check itself went to an IPv6 address the server could not reach).
+/// So only A records are returned, unless the profile itself carries an IPv6 tunnel address (WireGuard),
+/// which is the one case where IPv6 through the tunnel is known to be provisioned. IPv6 packets are still
+/// routed into the tunnel, so nothing leaks around it.
+fn dns_strategy(p: &Profile) -> &'static str {
+    let has_v6_address = matches!(p.protocol, Protocol::WireGuard)
+        && s(p, "address").is_some_and(|a| a.contains(':'));
+    if has_v6_address {
+        "prefer_ipv4"
+    } else {
+        "ipv4_only"
+    }
+}
+
 pub fn build(p: &Profile, mode: &Mode, dns: &[String]) -> Result<Built, EngineError> {
     build_with(
         p,
@@ -512,8 +530,7 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
             {"type": "local", "tag": "bootstrap"}
         ],
         "final": "remote",
-        // Prefer IPv4 addresses: many servers have no IPv6 egress and apps would otherwise stall on AAAA first.
-        "strategy": "prefer_ipv4"}),
+        "strategy": dns_strategy(p)}),
     );
 
     if matches!(p.protocol, Protocol::AmneziaWg) {

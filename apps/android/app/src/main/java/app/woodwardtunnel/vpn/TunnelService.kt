@@ -242,13 +242,20 @@ class TunnelService : VpnService(), PlatformInterface {
             return Outcome.Up(null, insecure)
         }
         var verdict: Verdict = Verdict.NoInternet
-        for (attempt in 0 until 2) {
+        for (attempt in 0 until 3) {
             if (stopRequested) return Outcome.Stopped
             val results = Probe.full(connectivity, monitor?.defaultNetwork())
             ConnectionTest.record(results)
             verdict = Health.verdict(results)
             EngineLog.add("check " + results.joinToString(" ") { "${it.check.name.lowercase()}=${it.status.name.lowercase()}" })
-            if (verdict !is Verdict.NoInternet) break
+            // Routes and DNS settle a moment after the interface comes up, so a first check can fail on one site
+            // although the tunnel is fine. Healthy ends the loop; so does a verdict that only lacks UDP (a
+            // property of the server, retrying cannot change it). Anything else gets one more look.
+            val v = verdict
+            val settled = v is Verdict.Healthy || v is Verdict.NotThroughVpn ||
+                (v is Verdict.Limited && v.reasons.all { it == Limit.UDP })
+            if (settled) break
+            if (attempt < 2 && !sleepUnlessStopped(1500)) return Outcome.Stopped
         }
         if (stopRequested) return Outcome.Stopped
         return when (verdict) {

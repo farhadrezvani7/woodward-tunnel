@@ -32,7 +32,7 @@ denied, 0 known vulnerabilities in dependencies (docs/DEPENDENCY-AUDIT.md).
 - No code signing, notarization, installers for Windows/macOS, store packaging: out of scope for now.
 - Windows and macOS: privilege handling, firewall rules (generators exist), keychain integration are untested.
 - macOS asks for an administrator password at each connect.
-- Android: real devices, API below 33 endpoint exclusion, full-tunnel AmneziaWG, TUIC/AnyTLS/SSH/WireGuard/SOCKS/HTTP/VMess/Hysteria1 not run. OpenVPN is not available on Android or iOS.
+- Android: a real phone (Samsung SM-A525F, Android 14, arm64) was tested on 2026-11-10 with Shadowsocks over USB reverse: connect, real HTTPS traffic through the tunnel, disconnect. UDP could not be tested there (adb reverse carries TCP only). Not run: API below 33 endpoint exclusion, full-tunnel AmneziaWG, TUIC/AnyTLS/SSH/WireGuard/SOCKS/HTTP/VMess/Hysteria1 not run. OpenVPN is not available on Android or iOS.
 - iOS: nothing compiled; memory limit of the extension unverified; AmneziaWG shares one Go heap with sing-box.
 - Supported only through sing-box: DNS-leak behavior is configured (DNS hijack, bootstrap resolver) but there is no automated per-OS leak test.
 - Licenses: sing-box license needs a legal read before distribution (GitHub reports no standard license); OpenVPN is GPL.
