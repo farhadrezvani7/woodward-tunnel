@@ -381,7 +381,7 @@ async fn run_job(ctx: JobCtx, mut cancel: CancelRx) -> Outcome {
     let mut ips = cached_ips;
 
     // 1. Helper binary present and recent enough (once per controller).
-    if profile.protocol.engine() != EngineKind::OpenVpn && !version_ok.load(Ordering::SeqCst) {
+    if profile.engine() != EngineKind::OpenVpn && !version_ok.load(Ordering::SeqCst) {
         if let Some(path) = cfg.version_check.clone() {
             let r = tokio::task::spawn_blocking(move || check_sing_box(&path)).await;
             match r {

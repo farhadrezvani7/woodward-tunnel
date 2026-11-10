@@ -20,6 +20,7 @@ use core_import::Analysis;
 use core_log::Redactor;
 use core_model::{EngineKind, Profile};
 use core_store::{ProfileSummary, SecretStore, Store, StoreError};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -69,6 +70,17 @@ pub enum LaunchPlan {
         singbox_config_json: String,
         socks_port: u16,
         endpoint_ip: String,
+    },
+    /// Run Xray-core with `xray_config_json` (its authenticated SOCKS5 inbound listens on
+    /// 127.0.0.1:`socks_port`), then sing-box with `singbox_config_json`, which tunnels into that port.
+    /// `server_ip` is the server address already resolved outside the tunnel; the sing-box config
+    /// excludes it from the TUN routes and Xray's own sockets must be excluded from the VPN by the platform.
+    Xray {
+        xray_config_json: String,
+        singbox_config_json: String,
+        socks_port: u16,
+        server_ip: String,
+        insecure_tls: bool,
     },
     /// Needs the OpenVPN binary; handled by the desktop runner.
     OpenVpn,
@@ -214,8 +226,42 @@ impl App {
         mode: Mode,
         dns: Vec<String>,
     ) -> Result<LaunchPlan, AppError> {
+        self.launch_plan_resolved(id, mode, dns, None)
+    }
+
+    /// Like [`App::launch_plan`], with the server address resolved by the caller on the real network
+    /// (the platform's own resolver, outside the tunnel). Used by the engines that need an IP literal
+    /// (AmneziaWG, Xray); without it the address is resolved here, preferring IPv4.
+    pub fn launch_plan_resolved(
+        &self,
+        id: &str,
+        mode: Mode,
+        dns: Vec<String>,
+        server_ip: Option<IpAddr>,
+    ) -> Result<LaunchPlan, AppError> {
         let p = self.profile(id)?;
-        Ok(match p.protocol.engine() {
+        let db = |e: core_engine::EngineError| StoreError::Db(e.to_string());
+        let resolve = || -> Result<IpAddr, StoreError> {
+            if let Some(ip) = server_ip {
+                return Ok(ip);
+            }
+            let all: Vec<_> = std::net::ToSocketAddrs::to_socket_addrs(&(p.host.as_str(), p.port))
+                .map(|a| a.collect())
+                .unwrap_or_default();
+            // Prefer IPv4: it is the safer default on networks with broken IPv6.
+            all.iter()
+                .find(|x| x.is_ipv4())
+                .or(all.first())
+                .map(|x| x.ip())
+                .ok_or_else(|| StoreError::Db("cannot resolve the server address".into()))
+        };
+        let free_port = || -> Result<u16, StoreError> {
+            std::net::TcpListener::bind(("127.0.0.1", 0))
+                .and_then(|l| l.local_addr())
+                .map(|a| a.port())
+                .map_err(|e| StoreError::Db(e.to_string()))
+        };
+        Ok(match p.engine() {
             EngineKind::SingBox => {
                 let b = core_engine::singbox::build_with(
                     &p,
@@ -225,40 +271,58 @@ impl App {
                         ..Default::default()
                     },
                 )
-                .map_err(|e| StoreError::Db(e.to_string()))?;
+                .map_err(db)?;
                 LaunchPlan::SingBox {
                     config_json: b.config.to_string(),
                     insecure_tls: !b.warnings.is_empty(),
                 }
             }
             EngineKind::AmneziaWg => {
-                let ip = std::net::ToSocketAddrs::to_socket_addrs(&(p.host.as_str(), p.port))
-                    .ok()
-                    .and_then(|mut a| a.next())
-                    .map(|a| a.ip())
-                    .ok_or_else(|| StoreError::Db("cannot resolve the server address".into()))?;
-                let port = std::net::TcpListener::bind(("127.0.0.1", 0))
-                    .and_then(|l| l.local_addr())
-                    .map(|a| a.port())
-                    .map_err(|e| StoreError::Db(e.to_string()))?;
-                let helper = core_engine::awg::helper_config(&p, ip, &format!("127.0.0.1:{port}"))
-                    .map_err(|e| StoreError::Db(e.to_string()))?;
+                let ip = resolve()?;
+                let up = core_engine::Upstream::new_random(free_port()?).map_err(db)?;
+                let mut helper =
+                    core_engine::awg::helper_config(&p, ip, &up.addr.to_string()).map_err(db)?;
+                helper["username"] = serde_json::json!(up.username);
+                helper["password"] = serde_json::json!(up.password);
                 let sb = core_engine::singbox::build_with(
                     &p,
                     &Options {
                         mode: Some(mode),
                         dns,
-                        upstream_socks: Some(std::net::SocketAddr::from(([127, 0, 0, 1], port))),
+                        upstream_socks: Some(up.clone()),
                         bypass: vec![ip],
                         ..Default::default()
                     },
                 )
-                .map_err(|e| StoreError::Db(e.to_string()))?;
+                .map_err(db)?;
                 LaunchPlan::AmneziaWg {
                     helper_json: helper.to_string(),
                     singbox_config_json: sb.config.to_string(),
-                    socks_port: port,
+                    socks_port: up.addr.port(),
                     endpoint_ip: ip.to_string(),
+                }
+            }
+            EngineKind::Xray => {
+                let ip = resolve()?;
+                let up = core_engine::Upstream::new_random(free_port()?).map_err(db)?;
+                let x = core_engine::xray::build(&p, ip, &up).map_err(db)?;
+                let sb = core_engine::singbox::build_with(
+                    &p,
+                    &Options {
+                        mode: Some(mode),
+                        dns,
+                        upstream_socks: Some(up.clone()),
+                        bypass: vec![ip],
+                        ..Default::default()
+                    },
+                )
+                .map_err(db)?;
+                LaunchPlan::Xray {
+                    xray_config_json: x.config.to_string(),
+                    singbox_config_json: sb.config.to_string(),
+                    socks_port: up.addr.port(),
+                    server_ip: ip.to_string(),
+                    insecure_tls: !x.warnings.is_empty(),
                 }
             }
             EngineKind::OpenVpn => LaunchPlan::OpenVpn,
@@ -330,10 +394,64 @@ mod tests {
                     singbox_config_json.contains("203.0.113.9/32")
                         && singbox_config_json.contains(&socks_port.to_string())
                 );
+                // The helper and sing-box share random credentials for the loopback SOCKS5 port.
+                let h: serde_json::Value = serde_json::from_str(&helper_json).unwrap();
+                let sb: serde_json::Value = serde_json::from_str(&singbox_config_json).unwrap();
+                assert_eq!(h["username"], sb["outbounds"][0]["username"]);
+                assert_eq!(h["password"], sb["outbounds"][0]["password"]);
+                assert_eq!(h["username"].as_str().map(str::len), Some(32));
             }
             other => panic!("{other:?}"),
         }
         a.delete(&awg_id).unwrap();
+        let xray_id = a
+            .import_text(
+                "vless://b831381d-6324-4d53-ad4f-8cda48b30811@vpn.example.com:443?type=xhttp&security=tls&path=/x#X",
+                "",
+            )
+            .unwrap()
+            .added[0]
+            .id
+            .clone();
+        let ip: IpAddr = "203.0.113.7".parse().unwrap();
+        match a
+            .launch_plan_resolved(&xray_id, Mode::Tun, vec![], Some(ip))
+            .unwrap()
+        {
+            LaunchPlan::Xray {
+                xray_config_json,
+                singbox_config_json,
+                socks_port,
+                server_ip,
+                insecure_tls,
+            } => {
+                assert_eq!(server_ip, "203.0.113.7");
+                assert!(!insecure_tls);
+                let x: serde_json::Value = serde_json::from_str(&xray_config_json).unwrap();
+                let sb: serde_json::Value = serde_json::from_str(&singbox_config_json).unwrap();
+                assert_eq!(x["outbounds"][0]["settings"]["address"], "203.0.113.7");
+                assert_eq!(x["inbounds"][0]["port"], socks_port);
+                let out = &sb["outbounds"][0];
+                assert_eq!(
+                    (out["type"].as_str(), out["server_port"].as_u64()),
+                    (Some("socks"), Some(u64::from(socks_port)))
+                );
+                assert_eq!(
+                    out["username"],
+                    x["inbounds"][0]["settings"]["accounts"][0]["user"]
+                );
+                assert_eq!(
+                    out["password"],
+                    x["inbounds"][0]["settings"]["accounts"][0]["pass"]
+                );
+                assert!(singbox_config_json.contains("203.0.113.7/32"));
+                // Nothing that opens a local API or an extra listener.
+                assert!(sb.get("experimental").is_none());
+                assert_eq!(sb["inbounds"].as_array().map(Vec::len), Some(1));
+            }
+            other => panic!("{other:?}"),
+        }
+        a.delete(&xray_id).unwrap();
         let s = a
             .import_subscription("https://x.example.com/sub", "Sub")
             .unwrap();

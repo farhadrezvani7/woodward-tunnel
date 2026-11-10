@@ -576,6 +576,7 @@ dependencies = [
  "base64 0.22.1",
  "core-log",
  "core-model",
+ "getrandom 0.3.4",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",

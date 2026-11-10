@@ -16,8 +16,10 @@ android="$root/apps/android"
 cache="$android/.cache"
 
 # ---- pins -------------------------------------------------------------------------------
-SINGBOX_TAG="v1.14.3"
-SINGBOX_COMMIT="7054cac5124465ffdb145870d7c01885566711b1"
+SINGBOX_TAG="v1.14.4"
+SINGBOX_COMMIT="c005f35300ce76427dc285481ec5695f5b179cd2"
+XRAY_VERSION="v26.11.9"                        # Xray-core release tag (module version is a pseudo-version, see engines/xray-mobile/go.mod)
+GO_TOOLCHAIN="go1.27.3"                        # Xray-core v26.11.9 needs Go 1.27
 GOMOBILE_VERSION="v0.1.13"                     # SagerNet fork, as in sing-box's Makefile (lib_install)
 NDK_VERSION="${NDK_VERSION:-28.2.13676358}"
 ANDROID_API=24                                 # minSdk
@@ -56,6 +58,12 @@ build_libbox() {
   local head
   head="$(git -C "$src" rev-parse HEAD)"
   if [ "$head" != "$SINGBOX_COMMIT" ]; then
+    # An older cached checkout: fetch the pinned tag and move to it (the commit is verified below).
+    git -C "$src" fetch --quiet --depth 1 origin "refs/tags/$SINGBOX_TAG:refs/tags/$SINGBOX_TAG"
+    git -C "$src" checkout --quiet --detach "$SINGBOX_TAG"
+    head="$(git -C "$src" rev-parse HEAD)"
+  fi
+  if [ "$head" != "$SINGBOX_COMMIT" ]; then
     echo "sing-box checkout is $head, expected $SINGBOX_COMMIT for $SINGBOX_TAG" >&2
     exit 1
   fi
@@ -65,15 +73,19 @@ build_libbox() {
   local awg_dir="$root/engines/awg-socks"
   local awg_hash
   awg_hash="$(cd "$awg_dir" && find . -name '*.go' -o -name go.mod -o -name go.sum | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
-  printf 'go 1.25.5\n\nuse ./sing-box\nuse %s\n' "$awg_dir" > "$cache/go.work"
-  local stamp="$SINGBOX_COMMIT|$GOMOBILE_VERSION|$LIBBOX_TAGS|$ANDROID_API|$NDK_VERSION|$awg_hash"
+  # Xray-core (engines/xray-mobile) goes into the same bind for the same reason: exactly one go.Seq.
+  local xray_dir="$root/engines/xray-mobile"
+  local xray_hash
+  xray_hash="$(cd "$xray_dir" && find . -name '*.go' -o -name go.mod -o -name go.sum | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
+  printf 'go 1.27\n\nuse ./sing-box\nuse %s\nuse %s\n' "$awg_dir" "$xray_dir" > "$cache/go.work"
+  local stamp="$SINGBOX_COMMIT|$GOMOBILE_VERSION|$LIBBOX_TAGS|$ANDROID_API|$NDK_VERSION|$awg_hash|$xray_hash|$GO_TOOLCHAIN"
   if [ -f "$android/app/libs/libbox.aar" ] && [ "$(cat "$cache/libbox.stamp" 2>/dev/null || true)" = "$stamp" ]; then
     echo "libbox.aar up to date"
     return
   fi
   (
     cd "$src"
-    export GOBIN="$cache/gobin" PATH="$cache/gobin:$PATH" GOWORK="$cache/go.work"
+    export GOBIN="$cache/gobin" PATH="$cache/gobin:$PATH" GOWORK="$cache/go.work" GOTOOLCHAIN="$GO_TOOLCHAIN"
     go install github.com/sagernet/gomobile/cmd/gomobile@"$GOMOBILE_VERSION" \
                github.com/sagernet/gomobile/cmd/gobind@"$GOMOBILE_VERSION"
     mkdir -p "$android/app/libs"
@@ -82,7 +94,8 @@ build_libbox() {
       -javapkg=io.nekohasekai -libname=box -trimpath -buildvcs=false \
       -ldflags "-X github.com/sagernet/sing-box/constant.Version=${SINGBOX_TAG#v} -X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0 -s -w -buildid=" \
       -tags "$LIBBOX_TAGS" ./experimental/libbox \
-      github.com/farhadrezvani7/woodward-tunnel/engines/awg-socks/mobile
+      github.com/farhadrezvani7/woodward-tunnel/engines/awg-socks/mobile \
+      github.com/farhadrezvani7/woodward-tunnel/engines/xray-mobile
   )
   echo "$stamp" > "$cache/libbox.stamp"
 }

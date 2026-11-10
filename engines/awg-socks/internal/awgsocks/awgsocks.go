@@ -5,6 +5,7 @@ package awgsocks
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -30,6 +31,11 @@ type Config struct {
 	Peer       Peer              `json:"peer"`
 	Awg        map[string]string `json:"awg"` // jc, jmin, jmax, s1..s4, h1..h4, i1..i5
 	Listen     string            `json:"listen"`
+	// Username and Password turn on RFC 1929 authentication on the SOCKS5 listener. Both empty means
+	// no authentication (desktop use on a loopback port nobody else can reach); the mobile apps always
+	// set them because any other app on the phone can connect to a loopback port.
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 type Peer struct {
@@ -118,8 +124,8 @@ func (i *Instance) Close() {
 	})
 }
 
-// Start brings the peer up and starts serving SOCKS5. The listener must be a loopback address:
-// the SOCKS5 server has no authentication.
+// Start brings the peer up and starts serving SOCKS5. The listener must be a loopback address.
+// Without Username/Password the SOCKS5 server has no authentication.
 func Start(cfg Config) (*Instance, error) {
 	if cfg.MTU == 0 {
 		cfg.MTU = 1280
@@ -145,6 +151,9 @@ func Start(cfg Config) (*Instance, error) {
 	}
 	if len(dns) == 0 {
 		dns = []netip.Addr{netip.MustParseAddr("1.1.1.1")}
+	}
+	if (cfg.Username == "") != (cfg.Password == "") || len(cfg.Username) > 255 || len(cfg.Password) > 255 {
+		return nil, errors.New("username and password must be set together (1-255 bytes each)")
 	}
 	listen := cfg.Listen
 	if listen == "" {
@@ -197,24 +206,64 @@ func Start(cfg Config) (*Instance, error) {
 			if err != nil {
 				return
 			}
-			go serve(c, tnet)
+			go serve(c, tnet, cfg.Username, cfg.Password)
 		}
 	}()
 	return inst, nil
 }
 
-// serve handles one SOCKS5 CONNECT (no authentication, loopback listener only).
-func serve(c net.Conn, tnet *netstack.Net) {
-	defer c.Close()
-	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
+// negotiate performs the SOCKS5 greeting. With credentials configured only username/password
+// (RFC 1929) is accepted; without, only "no authentication".
+func negotiate(c net.Conn, user, pass string) bool {
 	h := make([]byte, 2)
 	if _, err := io.ReadFull(c, h); err != nil || h[0] != 5 {
+		return false
+	}
+	methods := make([]byte, h[1])
+	if _, err := io.ReadFull(c, methods); err != nil {
+		return false
+	}
+	want := byte(0)
+	if user != "" {
+		want = 2
+	}
+	if !strings.ContainsRune(string(methods), rune(want)) {
+		c.Write([]byte{5, 0xff})
+		return false
+	}
+	c.Write([]byte{5, want})
+	if want == 0 {
+		return true
+	}
+	v := make([]byte, 2)
+	if _, err := io.ReadFull(c, v); err != nil || v[0] != 1 {
+		return false
+	}
+	u := make([]byte, int(v[1])+1)
+	if _, err := io.ReadFull(c, u); err != nil {
+		return false
+	}
+	pw := make([]byte, int(u[len(u)-1]))
+	if _, err := io.ReadFull(c, pw); err != nil {
+		return false
+	}
+	okU := subtle.ConstantTimeCompare(u[:len(u)-1], []byte(user))
+	okP := subtle.ConstantTimeCompare(pw, []byte(pass))
+	if okU&okP != 1 {
+		c.Write([]byte{1, 1})
+		return false
+	}
+	c.Write([]byte{1, 0})
+	return true
+}
+
+// serve handles one SOCKS5 CONNECT.
+func serve(c net.Conn, tnet *netstack.Net, user, pass string) {
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
+	if !negotiate(c, user, pass) {
 		return
 	}
-	if _, err := io.CopyN(io.Discard, c, int64(h[1])); err != nil {
-		return
-	}
-	c.Write([]byte{5, 0})
 	r := make([]byte, 4)
 	if _, err := io.ReadFull(c, r); err != nil || r[0] != 5 || r[1] != 1 {
 		c.Write([]byte{5, 7, 0, 1, 0, 0, 0, 0, 0, 0})

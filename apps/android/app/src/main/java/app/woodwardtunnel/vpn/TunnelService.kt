@@ -24,6 +24,8 @@ import app.woodwardtunnel.bindings.coreMessage
 import app.woodwardtunnel.ui.MainActivity
 import app.woodwardtunnel.ui.Prefs
 import io.nekohasekai.awgmobile.Awgmobile
+import io.nekohasekai.xraymobile.Protector
+import io.nekohasekai.xraymobile.Xraymobile
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
 import io.nekohasekai.libbox.ConnectionOwner
@@ -84,6 +86,7 @@ class TunnelService : VpnService(), PlatformInterface {
     private var tun: ParcelFileDescriptor? = null
     private var monitor: NetworkMonitor? = null
     private var awgRunning = false
+    private var xrayRunning = false
     private var profileId: String? = null
 
     @Volatile
@@ -93,6 +96,37 @@ class TunnelService : VpnService(), PlatformInterface {
     private var healthTask: java.util.concurrent.ScheduledFuture<*>? = null
     private val health = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { Thread(it, "wt-health").apply { isDaemon = true } }
     private val connectivity by lazy { getSystemService(android.net.ConnectivityManager::class.java) }
+
+    /** Resolves the profile's server on a non-VPN network, preferring IPv4. `null` lets the core resolve it. */
+    private fun resolveServer(profileId: String): String? {
+        val host = Core.get().list().firstOrNull { it.id == profileId }?.host ?: return null
+        if (host.contains(':') || host.all { it.isDigit() || it == '.' }) return null
+        val cm = connectivity ?: return null
+        val net = monitor?.defaultNetwork()
+            ?: cm.allNetworks.firstOrNull {
+                val c = cm.getNetworkCapabilities(it)
+                c != null && c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            } ?: return null
+        return try {
+            val all = net.getAllByName(host)
+            (all.firstOrNull { it is java.net.Inet4Address } ?: all.firstOrNull())?.hostAddress
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun waitForLocalPort(port: Int): Boolean {
+        repeat(40) {
+            try {
+                java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", port), 200) }
+                return true
+            } catch (_: Exception) {
+                Thread.sleep(50)
+            }
+        }
+        return false
+    }
 
     /** Number of automatic reconnects in this session (for the diagnostic report). */
     @Volatile
@@ -188,7 +222,9 @@ class TunnelService : VpnService(), PlatformInterface {
     /** Plan, engine start and the layered verification. Leaves the engine running only when it returns Up. */
     private fun bringUp(profileId: String): Outcome {
         val plan = try {
-            Core.get().launchPlan(profileId, Prefs.dnsServers(this))
+            // The server name is resolved here, on the real network and outside the tunnel, because the
+            // engines that run their own outbound (Xray, AmneziaWG) need an IP address.
+            Core.get().launchPlanResolved(profileId, Prefs.dnsServers(this), resolveServer(profileId))
         } catch (e: Exception) {
             EngineLog.add("launch plan failed")
             return Outcome.Failed(R.string.err_core, coreMessage = e.coreMessage())
@@ -197,6 +233,8 @@ class TunnelService : VpnService(), PlatformInterface {
         val insecure: Boolean
         var awgJson: String? = null
         var awgPort = 0
+        var xrayJson: String? = null
+        var xrayPort = 0
         when (plan) {
             is FfiLaunchPlan.SingBox -> {
                 config = plan.configJson
@@ -208,6 +246,12 @@ class TunnelService : VpnService(), PlatformInterface {
                 awgJson = plan.helperJson
                 awgPort = plan.socksPort.toInt()
             }
+            is FfiLaunchPlan.Xray -> {
+                config = plan.singboxConfigJson
+                insecure = plan.insecureTls
+                xrayJson = plan.xrayConfigJson
+                xrayPort = plan.socksPort.toInt()
+            }
             is FfiLaunchPlan.OpenVpn -> return Outcome.Failed(R.string.err_unsupported_protocol)
         }
         if (stopRequested) return Outcome.Stopped
@@ -218,6 +262,14 @@ class TunnelService : VpnService(), PlatformInterface {
                 val addr = Awgmobile.start(awgJson)
                 awgRunning = true
                 if (addr.substringAfterLast(':').toIntOrNull() != awgPort) error("helper listens elsewhere")
+            }
+            if (xrayJson != null) {
+                // Xray runs in this process; every socket it opens is excluded from the VPN with protect().
+                Xraymobile.start(xrayJson, object : Protector {
+                    override fun protect(fd: Long): Boolean = this@TunnelService.protect(fd.toInt())
+                })
+                xrayRunning = true
+                if (!waitForLocalPort(xrayPort)) error("Xray did not open its local port")
             }
             monitor = NetworkMonitor(this).also { m ->
                 m.onChanged = { scheduleHealthCheck(HealthMachine.AFTER_NETWORK_CHANGE_MS) }
@@ -397,6 +449,11 @@ class TunnelService : VpnService(), PlatformInterface {
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
+        // The front engine (sing-box, above) is already stopped; now the helpers it tunnelled into.
+        if (xrayRunning) {
+            runCatching { Xraymobile.stop() }
+            xrayRunning = false
+        }
         if (awgRunning) {
             runCatching { Awgmobile.stop() }
             awgRunning = false
@@ -528,8 +585,6 @@ class TunnelService : VpnService(), PlatformInterface {
         tun = pfd
         return pfd.fd
     }
-
-    override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < 29
 
     override fun findConnectionOwner(
         ipProtocol: Int, sourceAddress: String?, sourcePort: Int, destinationAddress: String?, destinationPort: Int,

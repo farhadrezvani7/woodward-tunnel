@@ -100,6 +100,17 @@ pub enum FfiLaunchPlan {
         socks_port: u16,
         endpoint_ip: String,
     },
+    /// Run Xray-core with `xray_config_json` (its authenticated SOCKS5 inbound listens on
+    /// 127.0.0.1:`socks_port`), then sing-box with `singbox_config_json`. `server_ip` is the
+    /// already-resolved server; it is excluded from the tunnel routes, and every socket Xray opens must be
+    /// excluded from the VPN by the platform (`VpnService.protect`).
+    Xray {
+        xray_config_json: String,
+        singbox_config_json: String,
+        socks_port: u16,
+        server_ip: String,
+        insecure_tls: bool,
+    },
     /// Needs the OpenVPN engine (not available on this build).
     OpenVpn,
 }
@@ -267,14 +278,49 @@ impl WtApp {
         }))
     }
 
-    /// `dns`: resolvers reached through the tunnel. Mobile always uses the system TUN.
+    /// `dns`: resolvers reached through the tunnel. Mobile always uses the system TUN. The server
+    /// address is resolved here (see [`WtApp::launch_plan_resolved`] to resolve it on the real network).
     pub fn launch_plan(&self, id: String, dns: Vec<String>) -> Result<FfiLaunchPlan, FfiError> {
-        match self.app.launch_plan(&id, Mode::Tun, dns).map_err(|_| {
-            fail(
-                "این کانفیگ آماده اتصال نیست.",
-                "This config is not ready to connect.",
-            )
-        })? {
+        self.plan(&id, dns, None)
+    }
+
+    /// Like `launch_plan`, with the server address resolved by the platform on the real (non-VPN)
+    /// network. `server_ip` is an IP literal or `None` to resolve inside the core.
+    pub fn launch_plan_resolved(
+        &self,
+        id: String,
+        dns: Vec<String>,
+        server_ip: Option<String>,
+    ) -> Result<FfiLaunchPlan, FfiError> {
+        let ip = match server_ip.filter(|s| !s.is_empty()) {
+            Some(s) => Some(s.parse::<std::net::IpAddr>().map_err(|_| {
+                fail(
+                    "نشانی سرور نامعتبر است.",
+                    "The server address is not a valid IP address.",
+                )
+            })?),
+            None => None,
+        };
+        self.plan(&id, dns, ip)
+    }
+}
+
+impl WtApp {
+    fn plan(
+        &self,
+        id: &str,
+        dns: Vec<String>,
+        ip: Option<std::net::IpAddr>,
+    ) -> Result<FfiLaunchPlan, FfiError> {
+        match self
+            .app
+            .launch_plan_resolved(id, Mode::Tun, dns, ip)
+            .map_err(|_| {
+                fail(
+                    "این کانفیگ آماده اتصال نیست.",
+                    "This config is not ready to connect.",
+                )
+            })? {
             LaunchPlan::SingBox {
                 config_json,
                 insecure_tls,
@@ -292,6 +338,19 @@ impl WtApp {
                 singbox_config_json,
                 socks_port,
                 endpoint_ip,
+            }),
+            LaunchPlan::Xray {
+                xray_config_json,
+                singbox_config_json,
+                socks_port,
+                server_ip,
+                insecure_tls,
+            } => Ok(FfiLaunchPlan::Xray {
+                xray_config_json,
+                singbox_config_json,
+                socks_port,
+                server_ip,
+                insecure_tls,
             }),
             LaunchPlan::OpenVpn => Ok(FfiLaunchPlan::OpenVpn),
         }

@@ -25,7 +25,7 @@ fn tmp(tag: &str) -> PathBuf {
 }
 
 fn backend_in(dir: &Path, kind: &str) -> Arc<Backend> {
-    let cfg = BackendConfig::new(dir.join("app"), Binaries { sing_box: "sing-box".into(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into() }, kind);
+    let cfg = BackendConfig::new(dir.join("app"), Binaries { sing_box: "sing-box".into(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into(), xray: "xray".into() }, kind);
     Backend::new(cfg, Arc::new(MemorySecretStore::default()), Arc::new(NoFetch), Arc::new(|_| {})).unwrap()
 }
 

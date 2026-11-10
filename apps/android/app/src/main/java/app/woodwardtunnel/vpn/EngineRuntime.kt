@@ -22,6 +22,9 @@ object EngineRuntime {
                 it.tempPath = tmp.path
                 // Workaround for Go issue 68760 on Android 7.0/7.1 and 9+.
                 it.fixAndroidStack = Build.VERSION.SDK_INT >= 28 || Build.VERSION.SDK_INT in 24..25
+                // commandServerListenPort stays 0 on purpose: libbox's command server then listens on a unix
+                // socket (command.sock) inside the app-private base path, protected by a per-process secret, and
+                // never on a TCP port. The generated sing-box config has no clash_api or experimental section.
                 it.logMaxLines = 200
                 it.debug = false
                 it.crashReportSource = "app"

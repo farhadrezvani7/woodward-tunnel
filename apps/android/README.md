@@ -28,8 +28,17 @@ library as sing-box so there is one Go runtime and one `go.Seq`), then libbox is
 sing-box config using the helper's loopback SOCKS5 port as upstream. The peer's endpoint IP is excluded from
 the TUN routes (`excludeRoute` on API 33+; on API 24-32 libbox hands over computed route ranges that already
 omit it, which `openTun` adds with `addRoute`). OpenVPN profiles show a Persian "not supported on this
-device yet" message. Server hostnames are resolved by sing-box's `local` DNS server, implemented by
+device yet" message (OpenVPN is desktop only). Server hostnames are resolved by sing-box's `local` DNS server, implemented by
 `vpn/LocalResolver.kt` on the device's real (non-VPN) default network.
+
+Second engine, Xray-core: configs sing-box cannot run (XHTTP/SplitHTTP, mKCP, TCP HTTP header obfuscation, VLESS
+encryption, Reality `pqv`, finalmask, certificate pins `pcs`/`vcn`) are marked `engine=xray` by the importer.
+Their launch plan (`FfiLaunchPlan.Xray`) carries a complete Xray JSON with one loopback SOCKS5 inbound (random
+per-session username and password, as for the AmneziaWG helper) and the sing-box config that tunnels into it.
+`TunnelService` resolves the server name on the real network (`resolveServer`, IPv4 preferred) and asks the core
+for `launchPlanResolved`, starts Xray (`engines/xray-mobile`, same gomobile library) with a `Protector` that calls
+`VpnService.protect` for every Xray socket, then starts libbox; teardown stops libbox first, then Xray, then the
+AmneziaWG peer. libbox's command server listens on an app-private unix socket (listen port 0), never on TCP.
 
 Error and import messages come from the core in Persian and English; the app shows the language of the
 app locale.
@@ -46,12 +55,12 @@ scripts/build-android.sh --skip-libbox   # reuse apps/android/app/libs/libbox.aa
 scripts/build-android.sh --skip-rust     # reuse existing .so files and bindings
 ```
 
-Pins: sing-box tag `v1.14.3` (commit checked), SagerNet gomobile `v0.1.13`, Gradle 8.14.3
+Pins: sing-box tag `v1.14.4` (commit checked; the script fetches the tag into an older cached checkout), Xray-core `v26.11.9` (Go 1.27.3 toolchain), SagerNet gomobile `v0.1.13`, Gradle 8.14.3
 (wrapper with checksum), AGP 8.13.0, Kotlin 2.2.20, Compose BOM 2025.09.01, JNA 5.17.0,
 zxing-android-embedded 4.3.0. libbox is built with the same `gomobile bind` invocation as
 sing-box's `build_libbox` but a smaller tag set (`with_gvisor,with_quic,with_wireguard,with_utls,
 with_clash_api`, no naive/tailscale/openvpn/openconnect/usbip). The same bind also includes
-`engines/awg-socks/mobile`; a `go.work` file in `.cache/` ties the pinned sing-box checkout and that module together.
+`engines/awg-socks/mobile` and `engines/xray-mobile`; a `go.work` file in `.cache/` ties the pinned sing-box checkout and those modules together (exactly one `go.Seq`).
 
 Outputs: `app/build/outputs/apk/debug/app-debug.apk` and `app/build/outputs/apk/release/app-release.apk`.
 The release APK is signed with a throwaway keystore generated into `apps/android/keystore`
@@ -84,7 +93,18 @@ dialog (`com.vpndialogs`) appears the first time; accept it by tapping OK at the
 by `uiautomator dump` (`android:id/button1`). `adb shell appops` cannot grant VPN consent here.
 Take screenshots with `adb exec-out screencap -p > shot.png`.
 
-## What was verified for real (x86_64 emulator, Android 16 / API 36.1, KVM)
+## What was verified on a real phone (Samsung SM-A525F, Android 14, arm64, release APK)
+
+`scripts/android-live/run.py` (host servers over `adb reverse`; UDP protocols through the UDP-over-TCP relay in
+`relay.go`) imports one share link per case and connects each through the app; "Connected" requires the app's own
+HTTPS check through the tunnel. Run against the release build on 2026-11-10: see the table in `docs/STATUS.md`
+for the exact result lines. Cases: Shadowsocks (+UDP), VLESS tcp / ws+tls / Reality, VMess, Trojan, AnyTLS,
+SOCKS5, HTTP, Hysteria2, TUIC, Hysteria1, WireGuard, SSH (pinned and unpinned host key, test server in
+`scripts/android-live/ssh-testserver`), Xray: XHTTP, VLESS encryption, TCP HTTP header, mKCP (UDP via the relay);
+AmneziaWG: with the connection check switched off (the script does it through Settings) `curl http://10.0.0.1:8080`
+on the phone returns `hello-through-awg` while connected and times out before and after.
+
+## What was verified for real earlier (x86_64 emulator, Android 16 / API 36.1, KVM)
 
 Host servers were local sing-box (Shadowsocks, Trojan, VLESS+WS, Hysteria2) and `engines/bin/awg-testserver`;
 the emulator reaches the host at 10.0.2.2. Each "Connected" below means the app's HTTPS probe through the tunnel
@@ -116,14 +136,18 @@ succeeded (except AmneziaWG, see there).
 - English text from the core (`reasonEn`): compiled in, not looked at on screen.
 - Camera QR scan, file and image pickers, subscription download, rename / group / delete dialogs.
 - Always-on VPN / "block connections without VPN": only the link to the system settings exists.
-- Other protocols through libbox (TUIC, AnyTLS, SSH, WireGuard, SOCKS, HTTP, VMess, Hysteria1), IPv6, UDP apps.
+- IPv6, UDP apps, any real provider's server (all live servers are on the host).
 - AmneziaWG with a full-tunnel (0.0.0.0/0) config and a real internet probe; the in-process helper has no
-  `VpnService.protect` of its own socket and relies on the route exclusion above.
+  `VpnService.protect` of its own socket and relies on the route exclusion above (Xray, by contrast, protects every socket).
+- Xray: Reality `pqv` (post-quantum verification) and `fm` finalmask against a real server; armeabi-v7a, x86 and x86_64
+  libraries are built (size below) but only arm64 was run on a device.
 - The CI workflow (`.github/workflows/android.yml`) was not executed.
 
 ## Known gaps
 
-- OpenVPN is not available on Android in this phase.
+- OpenVPN is not supported on Android (desktop only); the app says so. sing-box v1.14 has an `openvpn-client`
+  endpoint (needs the `with_openvpn` libbox tag), but it was left out on purpose.
+- Xray-core drops "skip certificate verification" (`allowInsecure`); such links are refused with a reason and need a pin (`pcs`) instead.
 - libbox writes the running config to `files/engine/configuration.json`; the app deletes it right
   after start, on stop and on launch. If the process is killed while connected it stays until the
   next launch (app-private storage, backups disabled).

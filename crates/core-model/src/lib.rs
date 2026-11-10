@@ -116,7 +116,14 @@ pub enum EngineKind {
     SingBox,
     OpenVpn,
     AmneziaWg,
+    /// Xray-core runs the outbound (transports and options sing-box cannot express); sing-box still owns
+    /// the TUN device, DNS and routing and tunnels into Xray's local SOCKS5 inbound.
+    Xray,
 }
+
+/// Setting that marks a profile Xray-core has to run (set by the importer, never by the user).
+pub const ENGINE_SETTING: &str = "engine";
+pub const ENGINE_XRAY: &str = "xray";
 
 impl Protocol {
     pub fn engine(self) -> EngineKind {
@@ -138,6 +145,22 @@ pub struct Profile {
     pub port: u16,
     pub settings: BTreeMap<String, String>,
     pub secrets: BTreeMap<String, Secret>,
+}
+
+impl Profile {
+    /// The backend that runs this profile. Marker-aware: V2Ray-family profiles whose settings need
+    /// Xray-core (XHTTP, mKCP, VLESS encryption ...) carry `engine=xray`.
+    pub fn engine(&self) -> EngineKind {
+        let xray_family = matches!(
+            self.protocol,
+            Protocol::Vless | Protocol::Vmess | Protocol::Trojan
+        );
+        if xray_family && self.settings.get(ENGINE_SETTING).map(String::as_str) == Some(ENGINE_XRAY)
+        {
+            return EngineKind::Xray;
+        }
+        self.protocol.engine()
+    }
 }
 
 /// Why a config was rejected. Each variant maps to a plain-language message.
@@ -218,6 +241,25 @@ mod tests {
         assert!(!format!("{s:?}{s}").contains("hunter2"));
         assert_eq!(s.expose(), "hunter2");
     }
+    #[test]
+    fn engine_marker_only_applies_to_xray_family() {
+        let mut p = Profile {
+            name: "n".into(),
+            protocol: Protocol::Vless,
+            host: "h".into(),
+            port: 1,
+            settings: BTreeMap::new(),
+            secrets: BTreeMap::new(),
+        };
+        assert_eq!(p.engine(), EngineKind::SingBox);
+        p.settings.insert(ENGINE_SETTING.into(), ENGINE_XRAY.into());
+        assert_eq!(p.engine(), EngineKind::Xray);
+        p.protocol = Protocol::Shadowsocks;
+        assert_eq!(p.engine(), EngineKind::SingBox);
+        p.protocol = Protocol::AmneziaWg;
+        assert_eq!(p.engine(), EngineKind::AmneziaWg);
+    }
+
     #[test]
     fn issue_messages_are_nonempty() {
         for i in [

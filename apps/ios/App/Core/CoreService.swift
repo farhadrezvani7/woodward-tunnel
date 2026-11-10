@@ -113,6 +113,9 @@ final class CoreService {
                 return .runSingBox(configJSON: configJson, insecureTLS: insecureTls)
             case .amneziaWg(let helperJson, let singboxConfigJson, _, _):
                 return .runAmneziaWG(helperJSON: helperJson, singboxConfigJSON: singboxConfigJson)
+            case .xray:
+                // Xray-core is not part of the iOS build (it would share the extension's memory limit).
+                return .unsupported(.xray)
             case .openVpn:
                 return .unsupported(.openVpn)
             }

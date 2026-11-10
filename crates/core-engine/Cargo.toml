@@ -9,6 +9,7 @@ core-log = { path = "../core-log" }
 serde_json.workspace = true
 base64.workspace = true
 thiserror.workspace = true
+getrandom = "0.3"
 tokio = { version = "1", features = ["process", "io-util", "time", "rt", "macros", "net", "sync"] }
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread"] }

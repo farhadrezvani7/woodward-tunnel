@@ -96,6 +96,37 @@ for a in d.get("assets",[]):
   (cd "$root/engines/awg-socks" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
     go build -trimpath -ldflags "-s -w" -o "$bin_dir/wt-awg-socks-$triple$exe" .)
   echo "built $bin_dir/wt-awg-socks-$triple$exe"
+
+  # Xray-core: second engine for XHTTP, mKCP, VLESS encryption and similar configs sing-box cannot run.
+  # Official release zip, pinned in engines.lock and checked against the .dgst the release publishes.
+  local xplat
+  case "$triple" in
+    x86_64-unknown-linux-gnu)  xplat=linux-64 ;;
+    aarch64-unknown-linux-gnu) xplat=linux-arm64-v8a ;;
+    x86_64-apple-darwin)       xplat=macos-64 ;;
+    aarch64-apple-darwin)      xplat=macos-arm64-v8a ;;
+    x86_64-pc-windows-msvc)    xplat=windows-64 ;;
+    aarch64-pc-windows-msvc)   xplat=windows-arm64-v8a ;;
+  esac
+  local xentry xtag xasset xwant
+  xentry="$(grep -E " Xray-${xplat}\.zip " "$lock" | grep -v '^#' | tail -n1 || true)"
+  [ -n "$xentry" ] || { echo "no pinned Xray-core for $xplat in $lock" >&2; exit 1; }
+  read -r xtag xasset xwant <<<"$xentry"
+  curl -fsSL --retry 3 -o "$work/$xasset" "https://github.com/XTLS/Xray-core/releases/download/$xtag/$xasset"
+  local xgot; xgot="$(sha256_of "$work/$xasset")"
+  [ "$xgot" = "$xwant" ] || { echo "FATAL: $xasset sha256 $xgot does not match engines.lock ($xwant)" >&2; exit 1; }
+  if [ "${WT_OFFLINE:-0}" != "1" ]; then
+    local xlive
+    xlive="$(curl -fsSL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/$xtag/$xasset.dgst" | sed -n 's/^SHA2-256= *//p' | head -n1)"
+    [ "$xlive" = "$xgot" ] || { echo "FATAL: $xasset sha256 $xgot does not match the release's published digest ($xlive)" >&2; exit 1; }
+  fi
+  mkdir -p "$work/xray"
+  "$PY" -I -m zipfile -e "$work/$xasset" "$work/xray"
+  local xfound; xfound="$(find "$work/xray" -type f -name "xray$exe" | head -n1)"
+  [ -n "$xfound" ] || { echo "xray not found in archive" >&2; exit 1; }
+  cp "$xfound" "$bin_dir/wt-xray-$triple$exe"
+  chmod +x "$bin_dir/wt-xray-$triple$exe"
+  echo "installed $bin_dir/wt-xray-$triple$exe ($xtag, sha256 verified)"
 }
 
 docker_run() {

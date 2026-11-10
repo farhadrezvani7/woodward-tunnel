@@ -275,6 +275,7 @@ pub struct AppInfo {
     pub sing_box_found: bool,
     pub awg_found: bool,
     pub openvpn_found: bool,
+    pub xray_found: bool,
     /// Secure storage state: "os" (keychain) or "memory" (not remembered after closing).
     pub secrets: String,
     pub privilege: &'static str,
@@ -662,6 +663,7 @@ impl Backend {
             sing_box_found: exists(&self.cfg.bins.sing_box),
             awg_found: exists(&self.cfg.bins.awg_socks),
             openvpn_found: exists(&self.cfg.bins.openvpn),
+            xray_found: exists(&self.cfg.bins.xray),
             secrets: self.cfg.secrets_kind.clone(),
             privilege: match self.privilege_state() {
                 PrivState::Ok => "ok",

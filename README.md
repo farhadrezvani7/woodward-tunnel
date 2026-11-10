@@ -12,6 +12,7 @@ Share links (`vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria://`, `hyste
 `anytls://`, `socks5://`, `http-proxy://`, `ssh://`, `wireguard://`), WireGuard and AmneziaWG `.conf`,
 OpenVPN `.ovpn`, Clash YAML, Xray JSON, sing-box JSON, Shadowsocks/Outline JSON, base64 subscriptions,
 subscription URLs (downloaded only after you confirm), Amnezia `vpn://` links, and QR images.
+XHTTP, mKCP, TCP HTTP header, VLESS encryption and similar V2Ray options run on Xray-core (a second engine next to sing-box). OpenVPN works on desktop only.
 Anything else is reported with a plain-language reason. Not supported: ShadowsocksR, Snell, NaiveProxy,
 Cloak, IKEv2/IPsec, L2TP, PPTP, SSTP, OpenConnect/AnyConnect.
 
@@ -20,6 +21,7 @@ Cloak, IKEv2/IPsec, L2TP, PPTP, SSTP, OpenConnect/AnyConnect.
 |---|---|
 | `crates/` | Rust core: import, store, session state machine, engine runner, leak-protection rules, FFI, CLI |
 | `engines/awg-socks/` | Go helper that runs AmneziaWG in user space (desktop and mobile) |
+| `engines/xray-mobile/` | Go gomobile wrapper for Xray-core (second engine: XHTTP, mKCP, VLESS encryption ...), Android |
 | `apps/desktop/` | Tauri app for Windows, macOS, Linux |
 | `apps/android/` | Android app (Kotlin, VpnService, sing-box libbox) |
 | `apps/ios/` | iOS and iPadOS app (SwiftUI, Network Extension) |

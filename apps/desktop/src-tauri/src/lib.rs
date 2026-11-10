@@ -166,7 +166,7 @@ fn discover_binaries() -> Binaries {
         PathBuf::from(if cfg!(windows) { format!("{last}.exe") } else { last.to_string() })
     };
     // Bundled sidecars carry a `wt-` prefix so they never collide with a system sing-box package.
-    Binaries { sing_box: pick(&["wt-sing-box", "sing-box"]), awg_socks: pick(&["wt-awg-socks", "awg-socks"]), openvpn: pick(&["openvpn"]) }
+    Binaries { sing_box: pick(&["wt-sing-box", "sing-box"]), awg_socks: pick(&["wt-awg-socks", "awg-socks"]), openvpn: pick(&["openvpn"]), xray: pick(&["wt-xray", "xray"]) }
 }
 
 struct Quitting(AtomicBool);

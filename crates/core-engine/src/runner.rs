@@ -18,6 +18,7 @@ pub struct Binaries {
     pub sing_box: PathBuf,
     pub awg_socks: PathBuf,
     pub openvpn: PathBuf,
+    pub xray: PathBuf,
 }
 
 impl Binaries {
@@ -41,6 +42,7 @@ impl Binaries {
             sing_box: pick("sing-box"),
             awg_socks: pick("awg-socks"),
             openvpn: pick("openvpn"),
+            xray: pick("xray"),
         }
     }
 }
@@ -285,7 +287,7 @@ fn singbox_iface() -> String {
 /// Tunnel interface name (or pattern) a profile's engine will use in TUN mode. Known before the
 /// engine starts, so leak protection can be prepared first.
 pub fn expected_tun_iface(profile: &Profile) -> String {
-    match profile.protocol.engine() {
+    match profile.engine() {
         EngineKind::OpenVpn => openvpn_iface(),
         _ => singbox_iface(),
     }
@@ -404,9 +406,10 @@ pub async fn start_cancellable(
 }
 
 async fn launch(profile: &Profile, o: &StartOptions, t: &mut Tunnel) -> Result<(), StartError> {
-    match profile.protocol.engine() {
+    match profile.engine() {
         EngineKind::SingBox => launch_singbox(profile, o, None, Vec::new(), t).await,
         EngineKind::AmneziaWg => launch_awg(profile, o, t).await,
+        EngineKind::Xray => launch_xray(profile, o, t).await,
         EngineKind::OpenVpn => launch_openvpn(profile, o, t).await,
     }
 }
@@ -453,7 +456,7 @@ async fn wait_proxy_ready(
 async fn launch_singbox(
     profile: &Profile,
     o: &StartOptions,
-    upstream: Option<SocketAddr>,
+    upstream: Option<crate::Upstream>,
     bypass: Vec<IpAddr>,
     t: &mut Tunnel,
 ) -> Result<(), StartError> {
@@ -472,7 +475,7 @@ async fn launch_singbox(
         ..Default::default()
     };
     let built = singbox::build_with(profile, &opts)?;
-    t.warnings = built.warnings;
+    t.warnings.extend(built.warnings);
     let mut cfg = built.config;
     cfg["log"]["level"] = serde_json::json!("info");
     let bytes = serde_json::to_vec(&cfg).map_err(|e| StartError::Io(e.to_string()))?;
@@ -498,20 +501,29 @@ async fn launch_singbox(
     }
 }
 
-async fn launch_awg(profile: &Profile, o: &StartOptions, t: &mut Tunnel) -> Result<(), StartError> {
+/// Resolve the server host outside the tunnel, preferring IPv4 (the safer default on networks with
+/// broken IPv6). Used by the engines that need an IP literal.
+async fn resolve_server(profile: &Profile) -> Result<IpAddr, StartError> {
     let host = profile.host.clone();
     let port = profile.port;
-    let ip = tokio::task::spawn_blocking(move || {
-        (host.as_str(), port)
-            .to_socket_addrs()
-            .ok()
-            .and_then(|mut a| a.next())
+    tokio::task::spawn_blocking(move || {
+        let all: Vec<_> = (host.as_str(), port).to_socket_addrs().ok()?.collect();
+        all.iter()
+            .find(|a| a.is_ipv4())
+            .or(all.first())
             .map(|a| a.ip())
     })
     .await
     .map_err(|_| StartError::Resolve)?
-    .ok_or(StartError::Resolve)?;
-    let cfg = awg::helper_config(profile, ip, "127.0.0.1:0")?;
+    .ok_or(StartError::Resolve)
+}
+
+async fn launch_awg(profile: &Profile, o: &StartOptions, t: &mut Tunnel) -> Result<(), StartError> {
+    let ip = resolve_server(profile).await?;
+    let (username, password) = crate::session_credentials()?;
+    let mut cfg = awg::helper_config(profile, ip, "127.0.0.1:0")?;
+    cfg["username"] = serde_json::json!(username);
+    cfg["password"] = serde_json::json!(password);
     let file = PrivateFile::write(
         &o.work_dir,
         &file_name("awg.json"),
@@ -533,7 +545,44 @@ async fn launch_awg(profile: &Profile, o: &StartOptions, t: &mut Tunnel) -> Resu
         .trim_start_matches("LISTEN ")
         .parse()
         .map_err(|_| StartError::Io("bad helper address".into()))?;
-    launch_singbox(profile, o, Some(addr), vec![ip], t).await
+    let up = crate::Upstream {
+        addr,
+        username,
+        password,
+    };
+    launch_singbox(profile, o, Some(up), vec![ip], t).await
+}
+
+/// Xray-core runs the outbound on a loopback SOCKS5 port, sing-box (TUN or proxy mode) tunnels into it.
+async fn launch_xray(
+    profile: &Profile,
+    o: &StartOptions,
+    t: &mut Tunnel,
+) -> Result<(), StartError> {
+    let ip = resolve_server(profile).await?;
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())?;
+    let up = crate::Upstream::new_random(port)?;
+    let built = crate::xray::build(profile, ip, &up)?;
+    t.warnings.extend(built.warnings.iter().cloned());
+    let file = PrivateFile::write(
+        &o.work_dir,
+        &file_name("xray.json"),
+        built.config.to_string().as_bytes(),
+    )?;
+    let helper = spawn(
+        &o.bins.xray,
+        vec!["run".into(), "-c".into(), file.path().into()],
+        &o.redactor,
+        &o.work_dir,
+        "xray",
+        &mut t._files,
+    )?;
+    t._files.push(file);
+    t.procs.push(("xray", helper));
+    wait_proxy_ready(last(t)?, up.addr, o.ready_timeout).await?;
+    launch_singbox(profile, o, Some(up), vec![ip], t).await
 }
 
 async fn launch_openvpn(

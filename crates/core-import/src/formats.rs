@@ -145,13 +145,125 @@ pub fn singbox_outbound(o: &Value, out: &mut Analysis) {
 
 // ---------- Xray JSON ----------
 
-fn xray_stream(s: Option<&Value>, host: &str, settings: &mut BTreeMap<String, String>) {
-    let Some(s) = s else { return };
+/// Transport options only Xray-core runs (XHTTP, mKCP, TCP HTTP header, finalmask, pins): stored as
+/// settings and the profile is marked for that engine. Anything that cannot be carried over is returned as
+/// an issue, never dropped.
+fn xray_only_stream(
+    s: &Value,
+    net: &str,
+    settings: &mut BTreeMap<String, String>,
+) -> Option<ConfigIssue> {
+    let mut xray = false;
+    match net {
+        "xhttp" | "splithttp" => {
+            settings.insert("type".into(), "xhttp".into());
+            let x = s
+                .get("xhttpSettings")
+                .or_else(|| s.get("splithttpSettings"));
+            if let Some(x) = x {
+                put(settings, "host", text(x, "host"));
+                put(settings, "path", text(x, "path"));
+                put(settings, "mode", text(x, "mode"));
+                if let Some(e) = x.get("extra").filter(|e| e.is_object()) {
+                    settings.insert("extra".into(), e.to_string());
+                }
+            }
+            xray = true;
+        }
+        "kcp" | "mkcp" => {
+            settings.insert("type".into(), "kcp".into());
+            if let Some(k) = s.get("kcpSettings") {
+                put(settings, "seed", text(k, "seed"));
+                if let Some(h) = k
+                    .get("header")
+                    .and_then(|h| text(h, "type"))
+                    .filter(|h| h != "none")
+                {
+                    settings.insert(
+                        "header_type".into(),
+                        if h == "wechat-video" {
+                            "wechat".into()
+                        } else {
+                            h
+                        },
+                    );
+                }
+            }
+            xray = true;
+        }
+        "tcp" | "raw" => {
+            let h = s
+                .get("tcpSettings")
+                .or_else(|| s.get("rawSettings"))
+                .and_then(|t| t.get("header"));
+            if h.and_then(|h| text(h, "type")).as_deref() == Some("http") {
+                settings.insert("header_type".into(), "http".into());
+                let req = h.and_then(|h| h.get("request"));
+                let first = |v: Option<&Value>| {
+                    v.and_then(Value::as_array)
+                        .and_then(|a| a.first())
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                };
+                put(settings, "path", first(req.and_then(|r| r.get("path"))));
+                put(
+                    settings,
+                    "host",
+                    first(
+                        req.and_then(|r| r.get("headers"))
+                            .and_then(|h| h.get("Host")),
+                    ),
+                );
+                xray = true;
+            }
+        }
+        _ => {}
+    }
+    if let Some(fm) = s.get("finalmask").filter(|f| f.is_object()) {
+        settings.insert("fm".into(), fm.to_string());
+        xray = true;
+    }
+    if let Some(t) = s.get("tlsSettings") {
+        if let Some(h) = text(t, "pinnedPeerCertSha256") {
+            settings.insert("pcs".into(), h);
+            xray = true;
+        }
+        if let Some(n) = text(t, "verifyPeerCertByName") {
+            settings.insert("vcn".into(), n);
+            xray = true;
+        }
+    }
+    if let Some(k) = s
+        .get("realitySettings")
+        .and_then(|r| text(r, "mldsa65Verify"))
+    {
+        settings.insert("pqv".into(), k);
+        xray = true;
+    }
+    if xray {
+        settings.insert(
+            core_model::ENGINE_SETTING.into(),
+            core_model::ENGINE_XRAY.into(),
+        );
+    }
+    None
+}
+
+fn xray_stream(
+    s: Option<&Value>,
+    host: &str,
+    settings: &mut BTreeMap<String, String>,
+) -> Option<ConfigIssue> {
+    let s = s?;
     let net = text(s, "network").unwrap_or_else(|| "tcp".into());
     let net = if net == "h2" { "http".to_string() } else { net };
-    if net != "tcp" {
+    if !matches!(
+        net.as_str(),
+        "tcp" | "raw" | "xhttp" | "splithttp" | "kcp" | "mkcp"
+    ) {
         settings.insert("type".into(), net.clone());
     }
+    let issue = xray_only_stream(s, &net, settings);
     let sec = text(s, "security").unwrap_or_default();
     if matches!(sec.as_str(), "tls" | "reality") {
         settings.insert("security".into(), sec.clone());
@@ -164,6 +276,16 @@ fn xray_stream(s: Option<&Value>, host: &str, settings: &mut BTreeMap<String, St
             text(t, "serverName").or_else(|| Some(host.to_string())),
         );
         put(settings, "fp", text(t, "fingerprint"));
+        // Xray servers since v26.9.8 need the X25519MLKEM768 key share that only Chrome-family
+        // fingerprints send, so these Reality fingerprints are corrected as the link importer does.
+        if sec == "reality"
+            && matches!(
+                settings.get("fp").map(String::as_str),
+                Some("random" | "randomized" | "edge" | "ios" | "qq")
+            )
+        {
+            settings.insert("fp".into(), "chrome".into());
+        }
         put(settings, "pbk", text(t, "publicKey"));
         put(settings, "sid", text(t, "shortId"));
         if text(t, "allowInsecure").as_deref() == Some("true") {
@@ -192,6 +314,7 @@ fn xray_stream(s: Option<&Value>, host: &str, settings: &mut BTreeMap<String, St
     if let Some(g) = s.get("grpcSettings") {
         put(settings, "serviceName", text(g, "serviceName"));
     }
+    issue
 }
 
 pub fn xray_outbound(o: &Value, out: &mut Analysis) {
@@ -231,6 +354,13 @@ pub fn xray_outbound(o: &Value, out: &mut Analysis) {
             };
             secrets.insert("uuid".into(), Secret::new(id));
             put(&mut settings, "flow", text(&u, "flow"));
+            if let Some(e) = text(&u, "encryption").filter(|e| e != "none") {
+                settings.insert("encryption".into(), e);
+                settings.insert(
+                    core_model::ENGINE_SETTING.into(),
+                    core_model::ENGINE_XRAY.into(),
+                );
+            }
             if p == Protocol::Vmess {
                 put(&mut settings, "cipher", text(&u, "security"));
                 put(&mut settings, "alter_id", text(&u, "alterId"));
@@ -341,7 +471,9 @@ pub fn xray_outbound(o: &Value, out: &mut Analysis) {
         "freedom" | "blackhole" | "dns" | "loopback" => return,
         _ => return out.issue(label, ConfigIssue::Unsupported("Xray outbound type")),
     };
-    xray_stream(o.get("streamSettings"), &host, &mut settings);
+    if let Some(issue) = xray_stream(o.get("streamSettings"), &host, &mut settings) {
+        return out.issue(label, issue);
+    }
     out.profile(Profile {
         name: name_of(o, &host),
         protocol,
@@ -742,6 +874,49 @@ mod tests {
         assert_eq!(a.profiles.len(), 2, "{:?}", a.issues);
         assert_eq!(a.profiles[0].settings["security"], "reality");
         assert_eq!(a.profiles[1].settings["type"], "ws");
+    }
+
+    #[test]
+    fn xray_json_xhttp_kcp_and_header_options_go_to_the_xray_engine() {
+        let x = format!(
+            r#"{{"outbounds":[
+          {{"protocol":"vless","tag":"x","settings":{{"vnext":[{{"address":"h.example.com","port":443,"users":[{{"id":"{UUID}","encryption":"none"}}]}}]}},
+            "streamSettings":{{"network":"xhttp","security":"tls","tlsSettings":{{"serverName":"h.example.com","pinnedPeerCertSha256":"{h}"}},
+              "xhttpSettings":{{"host":"cdn.example.com","path":"/x","mode":"stream-up","extra":{{"xPaddingBytes":"100-200"}}}}}}}},
+          {{"protocol":"vless","tag":"k","settings":{{"vnext":[{{"address":"h.example.com","port":443,"users":[{{"id":"{UUID}"}}]}}]}},
+            "streamSettings":{{"network":"kcp","kcpSettings":{{"seed":"abc","header":{{"type":"wechat-video"}}}}}}}},
+          {{"protocol":"vless","tag":"r","settings":{{"vnext":[{{"address":"h.example.com","port":443,"users":[{{"id":"{UUID}"}}]}}]}},
+            "streamSettings":{{"network":"tcp","security":"reality","realitySettings":{{"serverName":"a.com","fingerprint":"random","publicKey":"{k}","shortId":"01"}}}}}}]}}"#,
+            k = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            h = "ab".repeat(32)
+        );
+        let a = analyze(&x);
+        assert_eq!(a.profiles.len(), 3, "{:?}", a.issues);
+        let p = &a.profiles[0];
+        assert_eq!(p.engine(), core_model::EngineKind::Xray);
+        assert_eq!(
+            (
+                p.settings["type"].as_str(),
+                p.settings["mode"].as_str(),
+                p.settings["host"].as_str()
+            ),
+            ("xhttp", "stream-up", "cdn.example.com")
+        );
+        assert!(p.settings["extra"].contains("xPaddingBytes") && p.settings["pcs"].len() == 64);
+        let k = &a.profiles[1];
+        assert_eq!(k.engine(), core_model::EngineKind::Xray);
+        assert_eq!(
+            (
+                k.settings["seed"].as_str(),
+                k.settings["header_type"].as_str()
+            ),
+            ("abc", "wechat")
+        );
+        // Plain Reality over TCP stays on sing-box; the fingerprint sing-box servers do not need is kept
+        // as a Chrome one for Xray servers.
+        let r = &a.profiles[2];
+        assert_eq!(r.engine(), core_model::EngineKind::SingBox);
+        assert_eq!(r.settings["fp"], "chrome");
     }
 
     #[test]

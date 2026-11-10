@@ -85,6 +85,7 @@ fn cfg(dir: &std::path::Path, socks: u16, probe_port: u16) -> ControllerConfig {
             sing_box: "sing-box".into(),
             awg_socks: "awg-socks".into(),
             openvpn: "openvpn".into(),
+            xray: "xray".into(),
         },
         probe: SocketAddr::from(([127, 0, 0, 1], probe_port)),
         ready_timeout: Duration::from_secs(10),

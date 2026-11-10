@@ -40,7 +40,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/wt-sing-box", "binaries/wt-awg-socks"],
+    "externalBin": ["binaries/wt-sing-box", "binaries/wt-awg-socks", "binaries/wt-xray"],
     "resources": {
       "resources/macos-elevate-singbox.sh": "macos-elevate-singbox.sh",
       "resources/THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"

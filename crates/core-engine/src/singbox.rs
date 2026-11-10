@@ -3,7 +3,7 @@
 //! (which is reported as a warning for the UI to show).
 
 use crate::{EngineError, Mode};
-use core_model::{Profile, Protocol};
+use core_model::{EngineKind, Profile, Protocol};
 use serde_json::{json, Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,8 +381,9 @@ fn wireguard_endpoint(p: &Profile) -> Result<Value, EngineError> {
 pub struct Options {
     pub mode: Option<Mode>,
     pub dns: Vec<String>,
-    /// Local SOCKS5 listener of a helper engine (AmneziaWG); the "proxy" outbound points here.
-    pub upstream_socks: Option<std::net::SocketAddr>,
+    /// Authenticated local SOCKS5 listener of a helper engine (AmneziaWG, Xray); the "proxy" outbound
+    /// points here.
+    pub upstream_socks: Option<crate::Upstream>,
     /// Addresses that must bypass the tunnel (e.g. a helper engine's server endpoint).
     pub bypass: Vec<std::net::IpAddr>,
     /// Let QUIC (UDP 443) through. Off by default: many proxy servers relay UDP poorly or not at all,
@@ -499,9 +500,10 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
                     o.remove("interface_name");
                 }
             }
-            if !opts.bypass.is_empty() {
-                let ex: Vec<String> = opts
-                    .bypass
+            // Loopback never enters the tunnel, and platforms refuse to exclude it as a route.
+            let bypass: Vec<_> = opts.bypass.iter().filter(|ip| !ip.is_loopback()).collect();
+            if !bypass.is_empty() {
+                let ex: Vec<String> = bypass
                     .iter()
                     .map(|ip| {
                         if ip.is_ipv4() {
@@ -533,11 +535,15 @@ pub fn build_with(p: &Profile, opts: &Options) -> Result<Built, EngineError> {
         "strategy": dns_strategy(p)}),
     );
 
-    if matches!(p.protocol, Protocol::AmneziaWg) {
+    if matches!(p.engine(), EngineKind::AmneziaWg | EngineKind::Xray) {
         let up = opts
             .upstream_socks
+            .as_ref()
             .ok_or(EngineError::Profile("upstream_socks"))?;
-        cfg.insert("outbounds".into(), json!([{"type": "socks", "tag": "proxy", "server": up.ip().to_string(), "server_port": up.port(), "version": "5"}, {"type": "direct", "tag": "direct"}]));
+        cfg.insert("outbounds".into(), json!([{
+            "type": "socks", "tag": "proxy", "server": up.addr.ip().to_string(), "server_port": up.addr.port(),
+            "version": "5", "username": up.username, "password": up.password,
+        }, {"type": "direct", "tag": "direct"}]));
     } else if matches!(p.protocol, Protocol::WireGuard) {
         cfg.insert("endpoints".into(), json!([wireguard_endpoint(p)?]));
         cfg.insert(
@@ -586,6 +592,43 @@ mod dns_tests {
             "/q"
         );
         assert_eq!(remote_dns_server(Some("tls://dns.example"))["type"], "tls");
+    }
+
+    #[test]
+    fn loopback_servers_are_not_excluded_from_tun_routes() {
+        use core_model::{Profile, Protocol, Secret};
+        use std::collections::BTreeMap;
+        let mut secrets = BTreeMap::new();
+        secrets.insert("password".to_string(), Secret::new("pw-test-1234"));
+        let mut settings = BTreeMap::new();
+        settings.insert("cipher".to_string(), "aes-256-gcm".to_string());
+        let p = Profile {
+            name: "n".into(),
+            protocol: Protocol::Shadowsocks,
+            host: "h.example.com".into(),
+            port: 1,
+            settings,
+            secrets,
+        };
+        let cfg = |ips: Vec<std::net::IpAddr>| {
+            build_with(
+                &p,
+                &Options {
+                    mode: Some(Mode::Tun),
+                    bypass: ips,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .config
+        };
+        assert!(cfg(vec!["127.0.0.1".parse().unwrap()])["inbounds"][0]
+            .get("route_exclude_address")
+            .is_none());
+        assert_eq!(
+            cfg(vec!["203.0.113.7".parse().unwrap()])["inbounds"][0]["route_exclude_address"][0],
+            "203.0.113.7/32"
+        );
     }
 
     #[test]

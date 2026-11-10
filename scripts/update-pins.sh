@@ -63,7 +63,7 @@ if d.get("prerelease") and sys.argv[3] != "1":
 EOF
 
 # Refuse downgrades relative to the current lock.
-cur="$(grep -v '^#' "$lock" | awk 'NF{print $1}' | sort -V | tail -n1 || true)"
+cur="$(grep ' sing-box-' "$lock" | grep -v '^#' | awk 'NF{print $1}' | sort -V | tail -n1 || true)"
 if [ -n "$cur" ] && [ "$(printf '%s\n%s\n' "${cur#v}" "${tag#v}" | sort -V | head -n1)" != "${cur#v}" ]; then
   echo "refusing: $tag is older than the pinned $cur" >&2; exit 1
 fi
@@ -90,6 +90,8 @@ EOF
     fi
     echo "$tag $asset $got"
   done
+  # Pins of other engines (Xray-core) are not touched by a sing-box update.
+  grep -v '^#' "$lock" | grep -E ' Xray-' || true
 } > "$new"
 
 echo "---- proposed $lock ----"

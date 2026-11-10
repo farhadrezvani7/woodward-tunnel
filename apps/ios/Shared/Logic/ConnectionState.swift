@@ -49,6 +49,7 @@ public enum FailureKind: Equatable {
         case "server_unreachable": self = .serverUnreachable
         case "unsupported_amneziawg": self = .unsupportedEngine(.amneziaWg)
         case "unsupported_openvpn": self = .unsupportedEngine(.openVpn)
+        case "unsupported_xray": self = .unsupportedEngine(.xray)
         case "tunnel_start_failed": self = .tunnelStartFailed
         case "helper_start_failed": self = .helperStartFailed
         case "unknown": self = .unknown
@@ -74,6 +75,7 @@ public enum FailureKind: Equatable {
 public enum UnsupportedEngine: String, Equatable {
     case amneziaWg = "amneziawg"
     case openVpn = "openvpn"
+    case xray = "xray"
 }
 
 public enum ConnectionState: Equatable {

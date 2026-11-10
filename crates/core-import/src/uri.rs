@@ -54,7 +54,8 @@ impl Query {
             }
             let dec = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
             let (k, val) = (dec(k), dec(val));
-            if val.chars().count() > 2048 {
+            // Reality `pqv` (ML-DSA-65 public key) alone is about 2.6k characters.
+            if val.chars().count() > 4096 {
                 return Err(bad("link", "query"));
             }
             if !out.iter().any(|(ek, _)| ek.eq_ignore_ascii_case(&k)) {
@@ -204,8 +205,9 @@ impl Kind {
     }
 }
 
-/// Parameters that make the client verify the server in a way sing-box cannot reproduce.
-/// Ignoring them would connect with weaker verification than the link asked for.
+/// Parameters that make the client verify the server in a way sing-box cannot reproduce, on the link
+/// types only sing-box runs (QUIC family). Ignoring them would connect with weaker verification than the
+/// link asked for. V2Ray-family links go to Xray-core instead (see [`xray_params`]).
 fn reject_unhonorable(q: &Query) -> R<()> {
     if q.any(&["pcs", "pinSHA256", "pinnedPeerCertSha256"])
         .is_some()
@@ -222,6 +224,123 @@ fn reject_unhonorable(q: &Query) -> R<()> {
     }
     if q.get("fm").is_some() {
         return Err(unsup("Xray finalmask (fm)"));
+    }
+    Ok(())
+}
+
+/// Reality fingerprints Xray servers since v26.9.8 refuse: they need the X25519MLKEM768 key share that
+/// only the Chrome-family fingerprints send. Corrected instead of letting the connection fail.
+fn reality_fingerprint(fp: &'static str) -> &'static str {
+    match fp {
+        "random" | "randomized" | "edge" | "ios" | "qq" => "chrome",
+        other => other,
+    }
+}
+
+const KCP_HEADERS: &[(&str, &str)] = &[
+    ("none", "none"),
+    ("srtp", "srtp"),
+    ("utp", "utp"),
+    ("wechat-video", "wechat"),
+    ("wechat", "wechat"),
+    ("dtls", "dtls"),
+    ("wireguard", "wireguard"),
+    ("dns", "dns"),
+];
+
+/// A JSON object given in a share link (`extra`, `fm`): must parse, be an object and stay small.
+fn json_object(raw: &str, p: &'static str, field: &'static str) -> R<String> {
+    let v: serde_json::Value = serde_json::from_str(raw).map_err(|_| bad(p, field))?;
+    if !v.is_object() || raw.len() > 8192 {
+        return Err(bad(p, field));
+    }
+    Ok(v.to_string())
+}
+
+/// VLESS encryption string: `mlkem768x25519plus.<native|xorpub|random>.<0rtt|1rtt|N-Ms>.<padding...>.<key>`.
+fn vless_encryption(e: &str) -> Option<String> {
+    let ok_chars = e
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    let parts: Vec<&str> = e.split('.').collect();
+    let ok = ok_chars
+        && e.len() <= 4096
+        && parts.len() >= 4
+        && parts[0] == "mlkem768x25519plus"
+        && matches!(parts[1], "native" | "xorpub" | "random")
+        && parts[2..].iter().all(|x| !x.is_empty());
+    ok.then(|| e.to_string())
+}
+
+/// Options only Xray-core implements: pinning, post-quantum Reality verification, finalmask, VLESS
+/// encryption, and the transports `transport_params` marked. Sets `engine=xray` when any is present.
+fn xray_params(q: &Query, kind: Kind, security: &str, out: &mut Settings) -> R<()> {
+    let p = kind.label();
+    let mut xray = matches!(
+        out.get("type").map(String::as_str),
+        Some("xhttp") | Some("kcp")
+    ) || out.get("header_type").is_some_and(|h| h == "http");
+    if let Some(raw) = q.any(&["pcs", "pinSHA256", "pinnedPeerCertSha256"]) {
+        if security != "tls" {
+            return Err(bad(p, "certificate pin (needs TLS)"));
+        }
+        let mut hashes = Vec::new();
+        for h in raw.split(',').map(|x| x.trim().replace(':', "")) {
+            if h.len() != 64 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Err(bad(p, "certificate pin"));
+            }
+            hashes.push(h.to_ascii_lowercase());
+        }
+        put(out, "pcs", hashes.join(","));
+        xray = true;
+    }
+    if let Some(raw) = q.any(&["vcn", "verifyPeerCertByName"]) {
+        if security != "tls" {
+            return Err(bad(p, "verifyPeerCertByName (needs TLS)"));
+        }
+        let mut names = Vec::new();
+        for n in raw.split(',').map(str::trim).filter(|x| !x.is_empty()) {
+            names.push(v::host(n).ok_or(bad(p, "verifyPeerCertByName"))?);
+        }
+        if names.is_empty() {
+            return Err(bad(p, "verifyPeerCertByName"));
+        }
+        put(out, "vcn", names.join(","));
+        xray = true;
+    }
+    if let Some(raw) = q.get("pqv") {
+        if security != "reality" {
+            return Err(bad(p, "Reality post-quantum verification (needs Reality)"));
+        }
+        let ok = raw.len() >= 1000
+            && raw
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '=' | '+' | '/'));
+        if !ok {
+            return Err(bad(p, "Reality post-quantum verification (pqv)"));
+        }
+        put(out, "pqv", raw);
+        xray = true;
+    }
+    if let Some(raw) = q.get("fm") {
+        put(out, "fm", json_object(raw, p, "finalmask (fm)")?);
+        xray = true;
+    }
+    if kind == Kind::Vless {
+        if let Some(e) = q.get("encryption") {
+            if !e.eq_ignore_ascii_case("none") {
+                put(
+                    out,
+                    "encryption",
+                    vless_encryption(e)
+                        .ok_or(unsup("VLESS encryption other than mlkem768x25519plus"))?,
+                );
+                xray = true;
+            }
+        }
+    }
+    if xray {
+        put(out, core_model::ENGINE_SETTING, core_model::ENGINE_XRAY);
     }
     Ok(())
 }
@@ -253,10 +372,15 @@ fn tls_params(q: &Query, p: &'static str, security: &str, out: &mut Settings) ->
     }
     if let Some(f) = q.get("fp") {
         if !f.eq_ignore_ascii_case("none") {
+            let fp = v::utls_fingerprint(f).ok_or(bad(p, "fingerprint"))?;
             put(
                 out,
                 "fp",
-                v::utls_fingerprint(f).ok_or(bad(p, "fingerprint"))?,
+                if security == "reality" {
+                    reality_fingerprint(fp)
+                } else {
+                    fp
+                },
             );
         }
     }
@@ -315,11 +439,21 @@ fn transport_params(
     let ty = q.get("type").unwrap_or("tcp").to_ascii_lowercase();
     let header = q.get("headerType").unwrap_or("none").to_ascii_lowercase();
     match ty.as_str() {
-        "tcp" | "raw" | "original" => {
-            if header != "none" {
-                return Err(unsup("TCP HTTP header obfuscation (headerType=http)"));
+        "tcp" | "raw" | "original" => match header.as_str() {
+            "none" => {}
+            "http" => {
+                put(out, "header_type", "http");
+                put(
+                    out,
+                    "path",
+                    v::http_text(q.get("path").unwrap_or("/"), 512).ok_or(bad(p, "path"))?,
+                );
+                if let Some(h) = q.get("host") {
+                    put(out, "host", v::http_text(h, 512).ok_or(bad(p, "host"))?);
+                }
             }
-        }
+            _ => return Err(unsup("TCP header obfuscation other than http")),
+        },
         "ws" | "websocket" => {
             put(out, "type", "ws");
             let (path, ed) = split_early_data(q.get("path").unwrap_or("/"));
@@ -370,9 +504,47 @@ fn transport_params(
                 put(out, "host", v::http_text(h, 512).ok_or(bad(p, "host"))?);
             }
         }
-        "kcp" | "mkcp" => return Err(unsup("mKCP transport")),
+        "kcp" | "mkcp" => {
+            put(out, "type", "kcp");
+            let (_, h) = KCP_HEADERS
+                .iter()
+                .find(|(n, _)| *n == header)
+                .ok_or(bad(p, "mKCP headerType"))?;
+            if *h != "none" {
+                put(out, "header_type", *h);
+            }
+            if let Some(sd) = q.get("seed") {
+                if sd.chars().count() > 256 || sd.chars().any(char::is_control) {
+                    return Err(bad(p, "mKCP seed"));
+                }
+                put(out, "seed", sd);
+            }
+            if let Some(h) = q.get("host") {
+                put(out, "host", v::host(h).ok_or(bad(p, "host"))?);
+            }
+        }
         "quic" => return Err(unsup("QUIC transport")),
-        "xhttp" | "splithttp" => return Err(unsup("XHTTP (SplitHTTP) transport")),
+        "xhttp" | "splithttp" => {
+            put(out, "type", "xhttp");
+            let path = v::http_text(q.get("path").unwrap_or("/"), 512).ok_or(bad(p, "path"))?;
+            put(out, "path", path);
+            if let Some(h) = q.get("host") {
+                put(out, "host", v::http_text(h, 253).ok_or(bad(p, "host"))?);
+            }
+            if let Some(m) = q.get("mode") {
+                let m = m.to_ascii_lowercase();
+                if !matches!(
+                    m.as_str(),
+                    "auto" | "packet-up" | "stream-up" | "stream-one"
+                ) {
+                    return Err(bad(p, "XHTTP mode"));
+                }
+                put(out, "mode", m);
+            }
+            if let Some(e) = q.get("extra") {
+                put(out, "extra", json_object(e, p, "XHTTP extra")?);
+            }
+        }
         _ => return Err(unsup("unknown transport")),
     }
     Ok(())
@@ -432,7 +604,6 @@ fn packet_encoding(q: &Query, p: &'static str, out: &mut Settings) -> R<()> {
 /// Shared by VLESS, Trojan and standard-form VMess links.
 fn stream_settings(q: &Query, kind: Kind) -> R<Settings> {
     let p = kind.label();
-    reject_unhonorable(q)?;
     let security = match q
         .get("security")
         .unwrap_or("")
@@ -454,6 +625,7 @@ fn stream_settings(q: &Query, kind: Kind) -> R<Settings> {
     }
     let sni = out.get("sni").cloned();
     transport_params(q, p, security, sni.as_deref(), &mut out)?;
+    xray_params(q, kind, security, &mut out)?;
     if kind != Kind::Trojan {
         flow_param(q, p, security, &mut out)?;
         packet_encoding(q, p, &mut out)?;
@@ -484,15 +656,6 @@ fn vless_like(text: &str, kind: Kind) -> R<Profile> {
             "uuid".into(),
             Secret::new(v::user_id(&cred).ok_or(bad(p, "UUID"))?),
         );
-        if let Some(e) = link.query.get("encryption") {
-            if !e.eq_ignore_ascii_case("none") {
-                return Err(if e.starts_with("mlkem768x25519plus") {
-                    unsup("VLESS post-quantum encryption (mlkem768x25519plus)")
-                } else {
-                    unsup("VLESS encryption other than none")
-                });
-            }
-        }
     } else {
         if cred.chars().count() > 512 || cred.chars().any(char::is_control) {
             return Err(bad(p, "password"));
@@ -598,7 +761,18 @@ fn vmess(text: &str) -> R<Profile> {
                 pairs.push(("mode", t));
             }
         }
-        "kcp" | "mkcp" => {}
+        // v2rayN keeps the header type in `type` and the seed in `path` for mKCP.
+        "kcp" | "mkcp" => {
+            if let Some(t) = ty {
+                pairs.push(("headerType", t));
+            }
+            if let Some(pa) = pa {
+                pairs.push(("seed", pa));
+            }
+            if let Some(h) = h {
+                pairs.push(("host", h));
+            }
+        }
         _ => {
             if let Some(t) = ty {
                 pairs.push(("headerType", t));
@@ -1251,20 +1425,10 @@ mod tests {
     fn vless_rejects_what_it_cannot_honor() {
         let base = format!("vless://{UUID}@example.com:443?security=tls");
         for (extra, expect) in [
-            (
-                "&encryption=mlkem768x25519plus.native.0rtt.abc",
-                "post-quantum",
-            ),
             ("&encryption=aes-128-gcm", "encryption"),
-            ("&type=xhttp", "XHTTP"),
-            ("&type=kcp", "mKCP"),
             ("&type=quic", "QUIC"),
             ("&type=grpc&mode=multi", "multi"),
-            ("&headerType=http", "header"),
-            ("&pcs=abcd", "pinning"),
-            ("&vcn=x.com", "verifyPeerCertByName"),
-            ("&fm=%7B%7D", "finalmask"),
-            ("&pqv=abc", "post-quantum verification"),
+            ("&headerType=srtp", "header"),
             ("&flow=xtls-rprx-direct", "flow"),
             ("&ech=cloudflare-ech.com%2Bhttps%3A%2F%2Fdns.example", "ECH"),
         ] {
@@ -1291,6 +1455,88 @@ mod tests {
             )),
             Err(ConfigIssue::MissingField { .. })
         ));
+    }
+
+    #[test]
+    fn xray_only_parameters_are_stored_and_mark_the_engine() {
+        let hash = "ab".repeat(32);
+        let key = "A".repeat(1300);
+        let cases: Vec<(String, &str, &str)> = vec![
+            ("&type=xhttp&path=/x&host=h.com&mode=packet-up&extra=%7B%22xPaddingBytes%22%3A%22100-200%22%7D".into(), "type", "xhttp"),
+            ("&type=splithttp".into(), "type", "xhttp"),
+            ("&type=kcp&headerType=wechat-video&seed=abc".into(), "header_type", "wechat"),
+            ("&type=kcp&seed=abc".into(), "seed", "abc"),
+            ("&headerType=http&path=/a&host=b.com".into(), "header_type", "http"),
+            (format!("&pcs={hash}"), "pcs", &hash),
+            ("&vcn=a.com,b.com".into(), "vcn", "a.com,b.com"),
+            ("&fm=%7B%22udp%22%3A%5B%5D%7D".into(), "fm", "{\"udp\":[]}"),
+        ];
+        for (extra, k, want) in cases {
+            let x = p(&format!(
+                "vless://{UUID}@example.com:443?security=tls{extra}"
+            ))
+            .unwrap();
+            assert_eq!(set(&x, k).as_deref(), Some(want), "{extra}");
+            assert_eq!(set(&x, "engine").as_deref(), Some("xray"), "{extra}");
+        }
+        let e = "mlkem768x25519plus.native.0rtt.100-111-1111.75-0-111.50-0-3333.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let x = p(&format!("vless://{UUID}@example.com:443?encryption={e}")).unwrap();
+        assert_eq!(set(&x, "encryption").as_deref(), Some(e));
+        assert_eq!(set(&x, "engine").as_deref(), Some("xray"));
+        let x = p(&format!(
+            "vless://{UUID}@example.com:443?security=reality&sni=a.com&pbk={PBK}&pqv={key}"
+        ))
+        .unwrap();
+        assert_eq!(set(&x, "pqv").map(|v| v.len()), Some(1300));
+        assert_eq!(set(&x, "engine").as_deref(), Some("xray"));
+        // Plain links stay on sing-box.
+        let plain = p(&format!(
+            "vless://{UUID}@example.com:443?security=tls&type=ws"
+        ))
+        .unwrap();
+        assert!(!plain.settings.contains_key("engine"));
+        for bad in [
+            "&pcs=abcd",
+            "&pqv=abc",
+            "&type=xhttp&mode=bogus",
+            "&type=xhttp&extra=%5B%5D",
+            "&type=kcp&headerType=bogus",
+            "&fm=notjson",
+            "&encryption=mlkem768x25519plus.bogus.0rtt.k",
+        ] {
+            assert!(
+                p(&format!("vless://{UUID}@example.com:443?security=tls{bad}")).is_err(),
+                "{bad}"
+            );
+        }
+        // pcs and vcn need TLS, pqv needs Reality.
+        assert!(p(&format!("vless://{UUID}@example.com:443?pcs={hash}")).is_err());
+        assert!(p(&format!(
+            "vless://{UUID}@example.com:443?security=tls&pqv={key}"
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn reality_fingerprints_the_servers_refuse_become_chrome() {
+        for fp in ["random", "randomized", "edge", "ios", "qq"] {
+            let x = p(&format!(
+                "vless://{UUID}@example.com:443?security=reality&sni=a.com&pbk={PBK}&fp={fp}"
+            ))
+            .unwrap();
+            assert_eq!(set(&x, "fp").as_deref(), Some("chrome"), "{fp}");
+        }
+        let x = p(&format!(
+            "vless://{UUID}@example.com:443?security=reality&sni=a.com&pbk={PBK}&fp=firefox"
+        ))
+        .unwrap();
+        assert_eq!(set(&x, "fp").as_deref(), Some("firefox"));
+        // Plain TLS keeps what the link asked for.
+        let t = p(&format!(
+            "vless://{UUID}@example.com:443?security=tls&fp=random"
+        ))
+        .unwrap();
+        assert_eq!(set(&t, "fp").as_deref(), Some("random"));
     }
 
     #[test]
@@ -1353,12 +1599,17 @@ mod tests {
             Err(ConfigIssue::Unsupported(_))
         ));
         let tcp_http = format!(
-            r#"{{"add":"h.example.com","port":443,"id":"{UUID}","net":"tcp","type":"http"}}"#
+            r#"{{"add":"h.example.com","port":443,"id":"{UUID}","net":"tcp","type":"http","host":"a.com","path":"/x"}}"#
         );
-        assert!(matches!(
-            p(&format!("vmess://{}", STANDARD.encode(tcp_http))),
-            Err(ConfigIssue::Unsupported(_))
-        ));
+        let h = p(&format!("vmess://{}", STANDARD.encode(tcp_http))).unwrap();
+        assert_eq!(set(&h, "header_type").as_deref(), Some("http"));
+        assert_eq!(set(&h, "engine").as_deref(), Some("xray"));
+        let kcp = format!(
+            r#"{{"add":"h.example.com","port":443,"id":"{UUID}","net":"kcp","type":"wechat-video","path":"sd"}}"#
+        );
+        let k = p(&format!("vmess://{}", STANDARD.encode(kcp))).unwrap();
+        assert_eq!(set(&k, "header_type").as_deref(), Some("wechat"));
+        assert_eq!(set(&k, "seed").as_deref(), Some("sd"));
         let std = p(&format!(
             "vmess://{UUID}@h.example.com:443?encryption=zero&security=tls&type=ws&path=/a#S"
         ))

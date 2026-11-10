@@ -68,7 +68,7 @@ async fn setup(tag: &str, settings: Settings, probe_addr: Option<SocketAddr>, se
 
     let mut cfg = BackendConfig::new(
         dir.join("app"),
-        Binaries { sing_box: sing_box(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into() },
+        Binaries { sing_box: sing_box(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into(), xray: "xray".into() },
         "memory",
     );
     if let Some(p) = probe_addr {
@@ -162,7 +162,7 @@ async fn import_files_reads_only_chosen_regular_files() {
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("one.txt");
     std::fs::write(&f, "trojan://pw12345678@a.example.com:443#A\n").unwrap();
-    let cfg = BackendConfig::new(dir.join("app"), Binaries { sing_box: "sing-box".into(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into() }, "memory");
+    let cfg = BackendConfig::new(dir.join("app"), Binaries { sing_box: "sing-box".into(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into(), xray: "xray".into() }, "memory");
     let b = Backend::new(cfg, Arc::new(MemorySecretStore::default()), Arc::new(HttpFetcher), Arc::new(|_| {})).unwrap();
     let r = b.import_files(&[f.clone(), dir.clone(), dir.join("missing.txt")]).unwrap();
     assert_eq!(r.added.len(), 1);
@@ -257,7 +257,7 @@ async fn amneziawg_conf_through_backend() {
     // The probe is the in-tunnel server itself: Connected can only be reached if bytes crossed the tunnel.
     let (b, dir) = plain_backend(
         "awg",
-        Binaries { sing_box: sing_box(), awg_socks: awg.into(), openvpn: "openvpn".into() },
+        Binaries { sing_box: sing_box(), awg_socks: awg.into(), openvpn: "openvpn".into(), xray: "xray".into() },
         s,
         Some(SocketAddr::from(([10, 0, 0, 1], 8080))),
     );
@@ -307,7 +307,7 @@ async fn qr_image_file_imports_through_backend() {
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("shot.png");
     std::fs::write(&f, &png).unwrap();
-    let (b, d2) = plain_backend("qrapp", Binaries { sing_box: "sing-box".into(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into() }, Settings::default(), None);
+    let (b, d2) = plain_backend("qrapp", Binaries { sing_box: "sing-box".into(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into(), xray: "xray".into() }, Settings::default(), None);
     // The same entry point the file picker and the drag-drop handler use.
     let r = b.import_files(&[f]).unwrap();
     assert_eq!(r.added.len(), 1, "{:?}", r.problems);
@@ -337,7 +337,7 @@ async fn server_by_hostname() {
     let tun = std::env::var("WT_REMOTE_MODE").as_deref() == Ok("tun");
     let socks = free_port();
     let s = Settings { mode: if tun { "tun" } else { "proxy" }.into(), socks_port: socks, ..Settings::default() };
-    let (b, dir) = plain_backend("host", Binaries { sing_box: sing_box(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into() }, s, Some(SocketAddr::from(([1, 1, 1, 1], 443))));
+    let (b, dir) = plain_backend("host", Binaries { sing_box: sing_box(), awg_socks: "awg-socks".into(), openvpn: "openvpn".into(), xray: "xray".into() }, s, Some(SocketAddr::from(([1, 1, 1, 1], 443))));
     let id = b.import_text(&format!("ss://aes-256-gcm:pw-desktop-1234@{remote}#by-name")).unwrap().added[0].id.clone();
     assert!(b.list_profiles().unwrap()[0].host.chars().any(|c| c.is_alphabetic()));
     b.connect(&id).unwrap();

@@ -67,6 +67,7 @@ async fn run(kind: &str, expected: core_model::Protocol) {
             sing_box: "sing-box".into(),
             awg_socks: awg.into(),
             openvpn: "openvpn".into(),
+            xray: "xray".into(),
         },
         redactor: red,
         ready_timeout: Duration::from_secs(15),
@@ -111,7 +112,7 @@ async fn plain_wireguard_conf_over_awg_helper_is_not_used() {
     // A plain WireGuard profile is handled by sing-box directly; this guards the engine selection.
     let a = core_import::analyze("[Interface]\nPrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nEndpoint = 127.0.0.1:1\nAllowedIPs = 0.0.0.0/0\n");
     assert_eq!(
-        a.profiles[0].protocol.engine(),
+        a.profiles[0].engine(),
         core_model::EngineKind::SingBox
     );
 }
